@@ -11,6 +11,8 @@ const blockTypes: Array<{ type: Block["type"]; label: string; icon: string; desc
   { type: "multiple_choice", label: "Multiple Choice", icon: "○", description: "Single-select question" },
   { type: "multi_select", label: "Multi-Select", icon: "☑", description: "Multiple selection question" },
   { type: "free_text", label: "Free Text", icon: "📝", description: "Text response question" },
+  { type: "coding_block", label: "Coding Block", icon: "💻", description: "Code editor with syntax highlighting" },
+  { type: "latex_block", label: "LaTeX Block", icon: "📐", description: "LaTeX equation and math notation editor" },
   { type: "audio_response", label: "Audio Response", icon: "🎤", description: "Record audio answer" },
   { type: "video_response", label: "Video Response", icon: "📹", description: "Record video answer" },
   { type: "media_stimulus", label: "Media Stimulus", icon: "🖼️", description: "Image, video, or audio with questions" },

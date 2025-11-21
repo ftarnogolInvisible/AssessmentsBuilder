@@ -112,6 +112,22 @@ export default function BlockConfigForm({ block, allBlocks, onChange }: BlockCon
         </label>
       </div>
 
+      {/* Prevent Copy/Paste Toggle - Only for text-based blocks */}
+      {(block.type === "free_text" || block.type === "multiple_choice" || block.type === "multi_select" || block.type === "coding_block" || block.type === "latex_block") && (
+        <div className="flex items-center gap-3">
+          <input
+            type="checkbox"
+            id="preventCopyPaste"
+            checked={block.config?.preventCopyPaste || false}
+            onChange={(e) => updateConfig({ preventCopyPaste: e.target.checked })}
+            className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+          />
+          <label htmlFor="preventCopyPaste" className="text-sm font-medium text-gray-700">
+            Prevent Copy/Paste - Block copying from and pasting into this block
+          </label>
+        </div>
+      )}
+
       {/* Time Limit */}
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -519,6 +535,156 @@ export default function BlockConfigForm({ block, allBlocks, onChange }: BlockCon
               Maximum of 4 media items reached
             </p>
           )}
+        </div>
+      )}
+
+      {/* Coding Block Configuration */}
+      {block.type === "coding_block" && (
+        <div className="space-y-4">
+          <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
+            <p className="text-sm text-blue-800 font-medium mb-1">💻 Code Editor Settings</p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Programming Language
+            </label>
+            <select
+              value={block.config?.language || "javascript"}
+              onChange={(e) => updateConfig({ language: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="javascript">JavaScript</option>
+              <option value="python">Python</option>
+              <option value="java">Java</option>
+              <option value="c_cpp">C/C++</option>
+              <option value="typescript">TypeScript</option>
+              <option value="html">HTML</option>
+              <option value="css">CSS</option>
+              <option value="json">JSON</option>
+              <option value="sql">SQL</option>
+              <option value="ruby">Ruby</option>
+              <option value="php">PHP</option>
+              <option value="golang">Go</option>
+              <option value="rust">Rust</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Editor Theme
+            </label>
+            <select
+              value={block.config?.theme || "monokai"}
+              onChange={(e) => updateConfig({ theme: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="monokai">Monokai</option>
+              <option value="twilight">Twilight</option>
+              <option value="github">GitHub</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Example Code (Optional)
+            </label>
+            <p className="text-xs text-gray-500 mb-2">
+              Provide example code that test takers can see as a reference.
+            </p>
+            <textarea
+              value={block.config?.example || ""}
+              onChange={(e) => updateConfig({ example: e.target.value })}
+              rows={6}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
+              placeholder="function example() {&#10;  return 'Hello, World!';&#10;}"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Font Size
+              </label>
+              <input
+                type="number"
+                value={block.config?.fontSize || 14}
+                onChange={(e) => updateConfig({ fontSize: e.target.value ? parseInt(e.target.value) : 14 })}
+                min={10}
+                max={24}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              />
+            </div>
+            <div className="flex items-end">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={block.config?.showLineNumbers !== false}
+                  onChange={(e) => updateConfig({ showLineNumbers: e.target.checked })}
+                  className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                />
+                <span className="text-sm text-gray-700">Show Line Numbers</span>
+              </label>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={block.config?.wrap || false}
+                onChange={(e) => updateConfig({ wrap: e.target.checked })}
+                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+              />
+              <span className="text-sm text-gray-700">Enable Word Wrap</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={block.config?.readOnly || false}
+                onChange={(e) => updateConfig({ readOnly: e.target.checked })}
+                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+              />
+              <span className="text-sm text-gray-700">Read Only</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* LaTeX Block Configuration */}
+      {block.type === "latex_block" && (
+        <div className="space-y-4">
+          <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
+            <p className="text-sm text-blue-800 font-medium mb-1">📐 LaTeX Editor Settings</p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Example LaTeX (Optional)
+            </label>
+            <p className="text-xs text-gray-500 mb-2">
+              Provide example LaTeX code that test takers can see as a reference.
+            </p>
+            <textarea
+              value={block.config?.latexExample || ""}
+              onChange={(e) => updateConfig({ latexExample: e.target.value })}
+              rows={4}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
+              placeholder="E = mc^2 or \\frac{a}{b}"
+            />
+          </div>
+
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={block.config?.displayMode || false}
+              onChange={(e) => updateConfig({ displayMode: e.target.checked })}
+              className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+            />
+            <label className="text-sm text-gray-700">
+              Display Mode - Render LaTeX in centered, larger format (for equations)
+            </label>
+          </div>
         </div>
       )}
 

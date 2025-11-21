@@ -13,6 +13,8 @@ const blockTypeLabels: Record<Block["type"], string> = {
   multiple_choice: "Multiple Choice",
   multi_select: "Multi-Select",
   free_text: "Free Text",
+  coding_block: "Coding Block",
+  latex_block: "LaTeX Block",
   audio_response: "Audio Response",
   video_response: "Video Response",
   media_stimulus: "Media Stimulus",
@@ -150,6 +152,30 @@ export default function DraggableBlock({ block, onClick, onDelete }: DraggableBl
                 {block.config?.placeholder ? `Suggested Response: "${block.config.placeholder.substring(0, 50)}${block.config.placeholder.length > 50 ? '...' : ''}"` : "Text response field"}
                 {block.config?.minLength && ` | Min: ${block.config.minLength} chars`}
                 {block.config?.maxLength && ` | Max: ${block.config.maxLength} chars`}
+              </div>
+            )}
+            {block.type === "coding_block" && (
+              <div>
+                💻 Code editor
+                {block.config?.language && ` | Language: ${block.config.language}`}
+                {block.config?.theme && ` | Theme: ${block.config.theme}`}
+                {block.config?.example && (
+                  <div className="mt-1 text-green-600">✓ Example code provided</div>
+                )}
+                {block.config?.readOnly && (
+                  <div className="mt-1 text-amber-600">⚠ Read-only mode</div>
+                )}
+              </div>
+            )}
+            {block.type === "latex_block" && (
+              <div>
+                📐 LaTeX editor
+                {block.config?.displayMode && (
+                  <div className="mt-1 text-blue-600">📐 Display mode enabled</div>
+                )}
+                {block.config?.latexExample && (
+                  <div className="mt-1 text-green-600">✓ Example LaTeX provided</div>
+                )}
               </div>
             )}
             {block.type === "media_stimulus" && (

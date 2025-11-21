@@ -1,9 +1,58 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRight, CheckCircle, AlertCircle } from "lucide-react";
 import { Block, Assessment } from "@shared/schema";
 import AudioRecorder, { type AudioRecording } from "../builder/AudioRecorder";
 import VideoRecorder from "../builder/VideoRecorder";
+import CodingBlock from "../builder/CodingBlock";
+import LaTeXBlock from "../builder/LaTeXBlock";
+import katex from "katex";
+import "katex/dist/katex.min.css";
+
+// Helper component for displaying LaTeX example preview
+function LaTeXExamplePreview({ latex, displayMode }: { latex: string; displayMode: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  
+  useEffect(() => {
+    if (!ref.current || !latex) {
+      if (ref.current) {
+        ref.current.innerHTML = '<div class="text-gray-400 italic">No example</div>';
+      }
+      return;
+    }
+    
+    try {
+      // Clean up LaTeX input - remove display mode delimiters if present
+      let cleanedInput = latex.trim();
+      
+      // Remove \[ and \] delimiters
+      cleanedInput = cleanedInput.replace(/^\\\[/, '').replace(/\\\]$/, '');
+      // Remove $$ delimiters
+      cleanedInput = cleanedInput.replace(/^\$\$/, '').replace(/\$\$$/, '');
+      cleanedInput = cleanedInput.trim();
+      
+      // Determine display mode from delimiters if not explicitly set
+      let actualDisplayMode = displayMode;
+      if (latex.includes('\\[') || latex.includes('$$')) {
+        actualDisplayMode = true;
+      } else if (latex.includes('\\(') || (latex.includes('$') && !latex.startsWith('$$'))) {
+        actualDisplayMode = false;
+      }
+      
+      katex.render(cleanedInput, ref.current, {
+        throwOnError: false,
+        displayMode: actualDisplayMode,
+        errorColor: "#cc0000",
+      });
+    } catch (error: any) {
+      if (ref.current) {
+        ref.current.innerHTML = `<span class="text-red-600 text-sm">Error: ${error.message || "Invalid LaTeX"}</span>`;
+      }
+    }
+  }, [latex, displayMode]);
+  
+  return <div ref={ref} className={displayMode ? "text-center" : ""} />;
+}
 
 interface AssessmentTakerProps {
   publicUrl: string;
@@ -18,6 +67,14 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
   const [lastName, setLastName] = useState("");
   const [showStartScreen, setShowStartScreen] = useState(true);
   const [submitted, setSubmitted] = useState(false);
+  const [integrityViolations, setIntegrityViolations] = useState<{
+    copyAttempts: number;
+    pasteAttempts: Array<{ blockId: string; timestamp: string; attemptedContent: string }>;
+  }>({
+    copyAttempts: 0,
+    pasteAttempts: [],
+  });
+  const [violationNotification, setViolationNotification] = useState<string | null>(null);
 
   // Fetch assessment by public URL
   const { data: assessmentData, isLoading, error } = useQuery<Assessment & { blocks: Block[] }>({
@@ -92,6 +149,10 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
           }
         } else if (block.type === "free_text") {
           responseData.text = response;
+        } else if (block.type === "coding_block") {
+          responseData.code = response;
+        } else if (block.type === "latex_block") {
+          responseData.latex = response;
         }
 
         return {
@@ -117,6 +178,9 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
           lastName: lastName || null,
           name: firstName && lastName ? `${firstName} ${lastName}` : firstName || lastName || null, // Legacy field
           responses: responseData,
+          integrityViolations: integrityViolations.copyAttempts > 0 || integrityViolations.pasteAttempts.length > 0
+            ? integrityViolations
+            : undefined,
         }),
       });
 
@@ -226,6 +290,70 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
     setResponses(prev => ({ ...prev, [blockId]: value }));
   };
 
+  // Handle copy/paste prevention
+  const handleCopyPrevention = (block: Block, e: ClipboardEvent) => {
+    if (block.config?.preventCopyPaste) {
+      e.preventDefault();
+      e.clipboardData?.setData('text/plain', '');
+      
+      setIntegrityViolations(prev => ({
+        ...prev,
+        copyAttempts: prev.copyAttempts + 1,
+      }));
+      
+      setViolationNotification("Copying is not allowed for this question.");
+      setTimeout(() => setViolationNotification(null), 3000);
+    }
+  };
+
+  const handlePastePrevention = async (block: Block, e: ClipboardEvent) => {
+    if (block.config?.preventCopyPaste) {
+      e.preventDefault();
+      
+      const pastedContent = e.clipboardData?.getData('text/plain') || '';
+      
+      setIntegrityViolations(prev => ({
+        ...prev,
+        pasteAttempts: [
+          ...prev.pasteAttempts,
+          {
+            blockId: block.id || '',
+            timestamp: new Date().toISOString(),
+            attemptedContent: pastedContent,
+          },
+        ],
+      }));
+      
+      setViolationNotification("Pasting is not allowed for this question.");
+      setTimeout(() => setViolationNotification(null), 3000);
+    }
+  };
+
+  // Set up copy/paste prevention for current block
+  useEffect(() => {
+    if (!currentBlock || showStartScreen) return;
+    
+    const block = currentBlock;
+    if (!block.config?.preventCopyPaste) return;
+
+    const handleCopy = (e: ClipboardEvent) => handleCopyPrevention(block, e);
+    const handlePaste = (e: ClipboardEvent) => handlePastePrevention(block, e);
+    const handleCut = (e: ClipboardEvent) => {
+      // Treat cut as copy
+      handleCopyPrevention(block, e);
+    };
+
+    document.addEventListener('copy', handleCopy);
+    document.addEventListener('paste', handlePaste);
+    document.addEventListener('cut', handleCut);
+
+    return () => {
+      document.removeEventListener('copy', handleCopy);
+      document.removeEventListener('paste', handlePaste);
+      document.removeEventListener('cut', handleCut);
+    };
+  }, [currentBlock, showStartScreen]);
+
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
@@ -243,7 +371,27 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
       <div className="space-y-4">
         {/* Multiple Choice */}
         {block.type === "multiple_choice" && (
-          <div className="space-y-3">
+          <div 
+            className="space-y-3"
+            onCopy={(e) => {
+              if (block.config?.preventCopyPaste) {
+                e.preventDefault();
+                handleCopyPrevention(block, e.nativeEvent as ClipboardEvent);
+              }
+            }}
+            onPaste={(e) => {
+              if (block.config?.preventCopyPaste) {
+                e.preventDefault();
+                handlePastePrevention(block, e.nativeEvent as ClipboardEvent);
+              }
+            }}
+            onCut={(e) => {
+              if (block.config?.preventCopyPaste) {
+                e.preventDefault();
+                handleCopyPrevention(block, e.nativeEvent as ClipboardEvent);
+              }
+            }}
+          >
             {block.config?.options?.map((option, index) => (
               <label
                 key={index}
@@ -265,7 +413,27 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
 
         {/* Multi-Select */}
         {block.type === "multi_select" && (
-          <div className="space-y-3">
+          <div 
+            className="space-y-3"
+            onCopy={(e) => {
+              if (block.config?.preventCopyPaste) {
+                e.preventDefault();
+                handleCopyPrevention(block, e.nativeEvent as ClipboardEvent);
+              }
+            }}
+            onPaste={(e) => {
+              if (block.config?.preventCopyPaste) {
+                e.preventDefault();
+                handlePastePrevention(block, e.nativeEvent as ClipboardEvent);
+              }
+            }}
+            onCut={(e) => {
+              if (block.config?.preventCopyPaste) {
+                e.preventDefault();
+                handleCopyPrevention(block, e.nativeEvent as ClipboardEvent);
+              }
+            }}
+          >
             {block.config?.options?.map((option, index) => (
               <label
                 key={index}
@@ -294,12 +462,83 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
           <textarea
             value={responses[block.id || ''] || ''}
             onChange={(e) => updateResponse(block.id || '', e.target.value)}
+            onCopy={(e) => {
+              if (block.config?.preventCopyPaste) {
+                e.preventDefault();
+                handleCopyPrevention(block, e.nativeEvent as ClipboardEvent);
+              }
+            }}
+            onPaste={(e) => {
+              if (block.config?.preventCopyPaste) {
+                e.preventDefault();
+                handlePastePrevention(block, e.nativeEvent as ClipboardEvent);
+              }
+            }}
+            onCut={(e) => {
+              if (block.config?.preventCopyPaste) {
+                e.preventDefault();
+                handleCopyPrevention(block, e.nativeEvent as ClipboardEvent);
+              }
+            }}
             placeholder={block.config?.placeholder || "Enter your response..."}
             rows={6}
             maxLength={block.config?.maxLength}
             minLength={block.config?.minLength}
             className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           />
+        )}
+
+        {/* Coding Block */}
+        {block.type === "coding_block" && (
+          <div className="space-y-4">
+            {block.config?.example && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <p className="text-sm font-medium text-blue-900 mb-2">Example Code:</p>
+                <pre className="text-xs text-blue-800 font-mono whitespace-pre-wrap overflow-x-auto">
+                  {block.config.example}
+                </pre>
+              </div>
+            )}
+            <CodingBlock
+              value={responses[block.id || ''] || ''}
+              onChange={(value) => updateResponse(block.id || '', value)}
+              language={block.config?.language || "javascript"}
+              theme={block.config?.theme || "monokai"}
+              fontSize={block.config?.fontSize || 14}
+              showLineNumbers={block.config?.showLineNumbers !== false}
+              readOnly={block.config?.readOnly || false}
+              wrap={block.config?.wrap || false}
+              height="400px"
+              onCopy={block.config?.preventCopyPaste ? (e) => handleCopyPrevention(block, e) : undefined}
+              onPaste={block.config?.preventCopyPaste ? (e) => handlePastePrevention(block, e) : undefined}
+              onCut={block.config?.preventCopyPaste ? (e) => handleCopyPrevention(block, e) : undefined}
+            />
+          </div>
+        )}
+
+        {/* LaTeX Block */}
+        {block.type === "latex_block" && (
+          <div className="space-y-4">
+            {block.config?.latexExample && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <p className="text-sm font-medium text-blue-900 mb-2">Example LaTeX:</p>
+                <div className="text-sm text-blue-800 font-mono mb-2">{block.config.latexExample}</div>
+                <div className="text-xs text-blue-700 italic mb-2">Preview:</div>
+                <div className="p-3 bg-white rounded border border-blue-200">
+                  <LaTeXExamplePreview latex={block.config.latexExample} displayMode={block.config?.displayMode || false} />
+                </div>
+              </div>
+            )}
+            <LaTeXBlock
+              value={responses[block.id || ''] || ''}
+              onChange={(value) => updateResponse(block.id || '', value)}
+              displayMode={block.config?.displayMode || false}
+              height="300px"
+              onCopy={block.config?.preventCopyPaste ? (e) => handleCopyPrevention(block, e) : undefined}
+              onPaste={block.config?.preventCopyPaste ? (e) => handlePastePrevention(block, e) : undefined}
+              onCut={block.config?.preventCopyPaste ? (e) => handleCopyPrevention(block, e) : undefined}
+            />
+          </div>
         )}
 
         {/* Audio Response */}
@@ -512,6 +751,18 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
           </div>
         </div>
       </div>
+
+      {/* Violation Notification */}
+      {violationNotification && (
+        <div className="bg-red-50 border-b border-red-200 px-6 py-3">
+          <div className="max-w-4xl mx-auto">
+            <div className="flex items-center gap-2 text-red-800">
+              <AlertCircle className="w-5 h-5" />
+              <span className="text-sm font-medium">{violationNotification}</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-6">

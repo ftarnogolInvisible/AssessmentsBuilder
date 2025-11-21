@@ -96,7 +96,7 @@ export const assessments = pgTable("assessments", {
 export const blocks = pgTable("blocks", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   assessmentId: varchar("assessment_id").notNull().references(() => assessments.id, { onDelete: "cascade" }),
-  type: text("type").notNull(), // multiple_choice, multi_select, audio_response, video_response, media_stimulus, free_text
+  type: text("type").notNull(), // multiple_choice, multi_select, audio_response, video_response, media_stimulus, free_text, coding_block, latex_block
   order: integer("order").notNull(), // Order within assessment
   groupId: varchar("group_id"), // Groups blocks together to show side-by-side in preview
   title: text("title"),
@@ -131,6 +131,19 @@ export const blocks = pgTable("blocks", {
     // Scoring
     points?: number;
     rubric?: Array<{ level: string; description: string; points: number }>;
+    // Anti-cheating
+    preventCopyPaste?: boolean; // Prevent copy/paste for this block
+    // For coding block
+    language?: string; // Programming language mode (e.g., "javascript", "python", "java")
+    theme?: string; // ACE editor theme (e.g., "monokai", "twilight", "github")
+    example?: string; // Example code to show test takers
+    fontSize?: number; // Font size for the editor
+    showLineNumbers?: boolean; // Show line numbers
+    readOnly?: boolean; // Make editor read-only
+    wrap?: boolean; // Enable word wrap
+    // For LaTeX block
+    latexExample?: string; // Example LaTeX to show test takers
+    displayMode?: boolean; // Display LaTeX in display mode (centered, larger) vs inline mode
   }>().notNull().default({}),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -151,6 +164,14 @@ export const assessmentSubmissions = pgTable("assessment_submissions", {
   reviewerNotes: text("reviewer_notes"), // Internal notes from admin reviewers
   totalScore: integer("total_score"), // Calculated total score
   maxScore: integer("max_score"), // Maximum possible score
+  integrityViolations: json("integrity_violations").$type<{
+    copyAttempts?: number; // Count of copy attempts
+    pasteAttempts?: Array<{
+      blockId: string;
+      timestamp: string;
+      attemptedContent: string; // What they tried to paste
+    }>;
+  }>().notNull().default({}),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -178,6 +199,10 @@ export const blockResponses = pgTable("block_responses", {
     fileType?: string;
     // Text responses
     text?: string;
+    // For coding block
+    code?: string; // Code written by the user
+    // For LaTeX block
+    latex?: string; // LaTeX code written by the user
   }>().notNull(),
   score: integer("score"), // Points awarded for this response
   maxScore: integer("max_score"), // Maximum points possible for this block
@@ -289,7 +314,6 @@ export const insertAssessmentSubmissionSchema = createInsertSchema(assessmentSub
   id: true,
   createdAt: true,
   updatedAt: true,
-  submittedAt: true,
 });
 
 export const insertBlockResponseSchema = createInsertSchema(blockResponses).omit({
@@ -328,4 +352,5 @@ export type InsertBlockResponse = z.infer<typeof insertBlockResponseSchema>;
 export type ApiKey = typeof apiKeys.$inferSelect;
 export type InsertApiKey = z.infer<typeof insertApiKeySchema>;
 export type WebhookEvent = typeof webhookEvents.$inferSelect;
+export type InsertWebhookEvent = typeof webhookEvents.$inferInsert;
 

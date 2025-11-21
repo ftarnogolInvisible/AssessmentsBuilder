@@ -1,12 +1,60 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { X, Save, ChevronDown, ChevronRight, CheckCircle, XCircle } from "lucide-react";
 import { AssessmentSubmission, BlockResponse, Block } from "@shared/schema";
+// @ts-ignore - katex types
+import * as katex from "katex";
+import "katex/dist/katex.min.css";
 
 interface ReviewerViewProps {
   submission: AssessmentSubmission;
   assessmentId: string;
   onClose: () => void;
+}
+
+// Helper component to render LaTeX
+function LaTeXRenderer({ latex, displayMode }: { latex: string; displayMode: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  
+  useEffect(() => {
+    if (!ref.current || !latex) {
+      if (ref.current) {
+        ref.current.innerHTML = '<span class="text-gray-400 italic">No LaTeX</span>';
+      }
+      return;
+    }
+    
+    try {
+      // Clean up LaTeX input - remove display mode delimiters if present
+      let cleanedInput = latex.trim();
+      
+      // Remove \[ and \] delimiters
+      cleanedInput = cleanedInput.replace(/^\\\[/, '').replace(/\\\]$/, '');
+      // Remove $$ delimiters
+      cleanedInput = cleanedInput.replace(/^\$\$/, '').replace(/\$\$$/, '');
+      cleanedInput = cleanedInput.trim();
+      
+      // Determine display mode from delimiters if not explicitly set
+      let actualDisplayMode = displayMode;
+      if (latex.includes('\\[') || latex.includes('$$')) {
+        actualDisplayMode = true;
+      } else if (latex.includes('\\(') || (latex.includes('$') && !latex.startsWith('$$'))) {
+        actualDisplayMode = false;
+      }
+      
+      katex.render(cleanedInput, ref.current, {
+        throwOnError: false,
+        displayMode: actualDisplayMode,
+        errorColor: "#cc0000",
+      });
+    } catch (error: any) {
+      if (ref.current) {
+        ref.current.innerHTML = `<span class="text-red-600 text-sm">Error: ${error.message || "Invalid LaTeX"}</span>`;
+      }
+    }
+  }, [latex, displayMode]);
+  
+  return <div ref={ref} className={displayMode ? "text-center" : ""} />;
 }
 
 export default function ReviewerView({ submission, assessmentId, onClose }: ReviewerViewProps) {
@@ -305,6 +353,55 @@ export default function ReviewerView({ submission, assessmentId, onClose }: Revi
                 </div>
               )}
 
+              {block.type === "coding_block" && (
+                <div className="space-y-3">
+                  <p className="text-sm font-medium text-gray-700">Code Response:</p>
+                  <div className="bg-gray-900 rounded-lg p-4 overflow-x-auto">
+                    <pre className="text-sm text-gray-100 font-mono whitespace-pre">
+                      <code>{responseData.code || "No code submitted"}</code>
+                    </pre>
+                  </div>
+                  {block.config?.example && (
+                    <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                      <p className="text-xs font-medium text-blue-900 mb-2">Example Code (shown to test taker):</p>
+                      <pre className="text-xs text-blue-800 font-mono whitespace-pre-wrap overflow-x-auto">
+                        {block.config.example}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {block.type === "latex_block" && (
+                <div className="space-y-3">
+                  <p className="text-sm font-medium text-gray-700">LaTeX Response:</p>
+                  {responseData.latex ? (
+                    <>
+                      <div className="p-4 bg-gray-50 border border-gray-300 rounded-lg">
+                        <LaTeXRenderer latex={responseData.latex} displayMode={block.config?.displayMode || false} />
+                      </div>
+                      <div className="mt-2 p-3 bg-gray-100 rounded-lg">
+                        <p className="text-xs font-medium text-gray-600 mb-1">Raw LaTeX Code:</p>
+                        <pre className="text-xs text-gray-800 font-mono whitespace-pre-wrap break-words">
+                          {responseData.latex}
+                        </pre>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-sm text-gray-500 italic">No LaTeX submitted</p>
+                  )}
+                  {block.config?.latexExample && (
+                    <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                      <p className="text-xs font-medium text-blue-900 mb-2">Example LaTeX (shown to test taker):</p>
+                      <div className="text-xs text-blue-800 font-mono mb-2">{block.config.latexExample}</div>
+                      <div className="p-2 bg-white rounded border border-blue-200">
+                        <LaTeXRenderer latex={block.config.latexExample} displayMode={block.config?.displayMode || false} />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {(block.type === "audio_response" || block.type === "video_response") && (
                 <div className="space-y-3">
                   <p className="text-sm font-medium text-gray-700">Recording:</p>
@@ -497,6 +594,113 @@ export default function ReviewerView({ submission, assessmentId, onClose }: Revi
               submissionData.responses.map(renderResponse)
             )}
           </div>
+
+          {/* Integrity Violations */}
+          {(() => {
+            const violations = submissionData.integrityViolations;
+            const hasCopyAttempts = violations && (violations.copyAttempts ?? 0) > 0;
+            const hasPasteAttempts = violations && violations.pasteAttempts && Array.isArray(violations.pasteAttempts) && violations.pasteAttempts.length > 0;
+            const hasViolations = hasCopyAttempts || hasPasteAttempts;
+            const hasViolationsData = violations !== null && violations !== undefined;
+            
+            // Debug: Log violations data
+            console.log('[ReviewerView] Integrity violations data:', violations);
+            console.log('[ReviewerView] Has violations:', hasViolations);
+            console.log('[ReviewerView] Has violations data:', hasViolationsData);
+            console.log('[ReviewerView] Full submission data:', submissionData);
+            
+            // Always show the section
+            return (
+              <div className="mt-6 border-t border-gray-200 pt-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                  {hasViolations ? (
+                    <XCircle className="w-5 h-5 text-red-600" />
+                  ) : (
+                    <CheckCircle className="w-5 h-5 text-green-600" />
+                  )}
+                  Integrity Violations
+                </h3>
+                
+                <div className="space-y-4">
+                  {/* Copy Attempts */}
+                  {hasCopyAttempts && violations && (
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <XCircle className="w-5 h-5 text-red-600" />
+                        <span className="font-medium text-red-900">Copy Attempts</span>
+                      </div>
+                      <p className="text-sm text-red-800">
+                        User attempted to copy content <strong>{violations.copyAttempts}</strong> time{(violations.copyAttempts ?? 0) !== 1 ? 's' : ''}.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Paste Attempts */}
+                  {hasPasteAttempts && violations && (
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                      <div className="flex items-center gap-2 mb-3">
+                        <XCircle className="w-5 h-5 text-red-600" />
+                        <span className="font-medium text-red-900">Paste Attempts</span>
+                        <span className="text-sm text-red-700">
+                          ({violations.pasteAttempts.length} attempt{violations.pasteAttempts.length !== 1 ? 's' : ''})
+                        </span>
+                      </div>
+                      <div className="space-y-3">
+                        {violations.pasteAttempts.map((attempt: any, index: number) => {
+                          const block = getBlock(attempt.blockId);
+                          return (
+                            <div key={index} className="bg-white border border-red-300 rounded p-3">
+                              <div className="flex items-start justify-between mb-2">
+                                <div>
+                                  <p className="text-xs font-medium text-gray-600">
+                                    Block: {block?.title || `Block ${blocks.findIndex(b => b.id === attempt.blockId) + 1}`}
+                                  </p>
+                                  <p className="text-xs text-gray-500">
+                                    {new Date(attempt.timestamp).toLocaleString()}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="mt-2">
+                                <p className="text-xs font-medium text-gray-700 mb-1">Attempted to paste:</p>
+                                <div className="bg-gray-50 border border-gray-200 rounded p-2">
+                                  <p className="text-sm text-gray-900 whitespace-pre-wrap break-words">
+                                    {attempt.attemptedContent || "(empty)"}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* No Violations Message */}
+                  {!hasViolations && hasViolationsData && (
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle className="w-5 h-5 text-green-600" />
+                        <span className="text-sm font-medium text-green-900">
+                          No integrity violations detected
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* No Tracking Data (Old Submissions) */}
+                  {!hasViolationsData && (
+                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-gray-600">
+                          Integrity tracking was not enabled for this submission.
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Internal Notes */}
           <div className="mt-6">

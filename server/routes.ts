@@ -155,7 +155,7 @@ export async function registerRoutes(app: Express): Promise<void> {
         return res.status(403).json({ error: "Assessment is not published" });
       }
 
-      const { email, firstName, lastName, name, responses } = req.body;
+      const { email, firstName, lastName, name, responses, integrityViolations } = req.body;
       
       console.log("[Routes] Creating submission with:", {
         assessmentId: assessment.id,
@@ -164,7 +164,8 @@ export async function registerRoutes(app: Express): Promise<void> {
         firstName,
         lastName,
         name,
-        responseCount: responses?.length || 0
+        responseCount: responses?.length || 0,
+        hasIntegrityViolations: !!integrityViolations
       });
       
       // Create submission with status "to_review" instead of "completed"
@@ -178,6 +179,7 @@ export async function registerRoutes(app: Express): Promise<void> {
         status: "to_review",
         progress: 100,
         submittedAt: new Date(),
+        integrityViolations: integrityViolations || { copyAttempts: 0, pasteAttempts: [] },
       });
 
       console.log("[Routes] Submission created:", submission.id);
@@ -798,6 +800,11 @@ export async function registerRoutes(app: Express): Promise<void> {
         return res.status(404).json({ error: "Submission not found" });
       }
       const responses = await storage.getBlockResponses(submissionId);
+      
+      // Debug: Log integrity violations
+      console.log("[Routes] Submission integrityViolations:", submission.integrityViolations);
+      console.log("[Routes] Submission integrityViolations type:", typeof submission.integrityViolations);
+      
       res.json({ ...submission, responses });
     } catch (error: any) {
       console.error("[Routes] Error fetching submission:", error);

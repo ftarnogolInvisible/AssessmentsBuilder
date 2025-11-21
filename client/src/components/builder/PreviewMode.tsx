@@ -1,8 +1,62 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, Component, ErrorInfo, ReactNode } from "react";
 import { X, ArrowLeft, ArrowRight } from "lucide-react";
 import { Block } from "@shared/schema";
 import AudioRecorder, { type AudioRecording } from "./AudioRecorder";
 import VideoRecorder from "./VideoRecorder";
+import CodingBlock from "./CodingBlock";
+import LaTeXBlock from "./LaTeXBlock";
+import "katex/dist/katex.min.css";
+
+// Error Boundary component
+class ErrorBoundary extends Component<
+  { children: ReactNode; fallback?: ReactNode },
+  { hasError: boolean; error: Error | null }
+> {
+  constructor(props: { children: ReactNode; fallback?: ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error("[PreviewMode] Error caught by boundary:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback || (
+        <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+          <p className="text-red-800 font-medium">Error rendering component</p>
+          <p className="text-red-600 text-sm mt-1">{this.state.error?.message || "Unknown error"}</p>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// Safe wrapper for LaTeXBlock to catch rendering errors
+function SafeLaTeXBlock(props: Parameters<typeof LaTeXBlock>[0]) {
+  // Ensure value is always a string
+  const safeProps = {
+    ...props,
+    value: props.value || "",
+  };
+  
+  return (
+    <ErrorBoundary fallback={
+      <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+        <p className="text-yellow-800 font-medium">LaTeX Block Error</p>
+        <p className="text-yellow-600 text-sm mt-1">Unable to render LaTeX block. Please check the console for details.</p>
+      </div>
+    }>
+      <LaTeXBlock {...safeProps} />
+    </ErrorBoundary>
+  );
+}
 
 interface PreviewModeProps {
   blocks: Block[];
@@ -113,8 +167,13 @@ export default function PreviewMode({ blocks, assessmentName, onClose }: Preview
 
   // Render block content (questions, inputs, etc.)
   const renderBlockContent = (block: Block) => {
-    return (
-      <div className="space-y-4">
+    if (!block) {
+      return <div className="text-gray-500">No block content</div>;
+    }
+    
+    try {
+      return (
+        <div className="space-y-4">
         {/* Multiple Choice */}
         {block.type === "multiple_choice" && (
           <div className="space-y-3">
@@ -176,6 +235,41 @@ export default function PreviewMode({ blocks, assessmentName, onClose }: Preview
           />
         )}
 
+        {/* Coding Block */}
+        {block.type === "coding_block" && (
+          <div className="space-y-4">
+            {block.config?.example && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <p className="text-sm font-medium text-blue-900 mb-2">Example Code:</p>
+                <pre className="text-xs text-blue-800 font-mono whitespace-pre-wrap overflow-x-auto">
+                  {block.config.example}
+                </pre>
+              </div>
+            )}
+            <CodingBlock
+              value={responses[block.id || ''] || ''}
+              onChange={(value) => updateResponse(block.id || '', value)}
+              language={block.config?.language || "javascript"}
+              theme={block.config?.theme || "monokai"}
+              fontSize={block.config?.fontSize || 14}
+              showLineNumbers={block.config?.showLineNumbers !== false}
+              readOnly={block.config?.readOnly || false}
+              wrap={block.config?.wrap || false}
+              height="400px"
+            />
+          </div>
+        )}
+
+        {/* LaTeX Block */}
+        {block.type === "latex_block" && (
+          <SafeLaTeXBlock
+            value={responses[block.id || ''] || ''}
+            onChange={(value) => updateResponse(block.id || '', value)}
+            displayMode={block.config?.displayMode || false}
+            height="300px"
+          />
+        )}
+
         {/* Audio Response */}
         {block.type === "audio_response" && (
           <div>
@@ -221,7 +315,16 @@ export default function PreviewMode({ blocks, assessmentName, onClose }: Preview
           />
         )}
       </div>
-    );
+      );
+    } catch (error: any) {
+      console.error("[PreviewMode] Error rendering block:", error);
+      return (
+        <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+          <p className="text-red-800 font-medium">Error rendering block</p>
+          <p className="text-red-600 text-sm mt-1">{error.message || "Unknown error"}</p>
+        </div>
+      );
+    }
   };
 
   if (!currentBlock) {
