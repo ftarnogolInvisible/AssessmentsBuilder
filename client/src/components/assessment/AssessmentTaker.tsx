@@ -8,6 +8,7 @@ import CodingBlock from "../builder/CodingBlock";
 import LaTeXBlock from "../builder/LaTeXBlock";
 import katex from "katex";
 import "katex/dist/katex.min.css";
+import ProctoringCamera from "./ProctoringCamera";
 
 // Helper component for displaying LaTeX example preview
 function LaTeXExamplePreview({ latex, displayMode }: { latex: string; displayMode: boolean }) {
@@ -62,10 +63,13 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
   const [currentBlockIndex, setCurrentBlockIndex] = useState(0);
   const [responses, setResponses] = useState<Record<string, any>>({});
   const [timeRemaining, setTimeRemaining] = useState<Record<string, number>>({});
+  const [expiredBlocks, setExpiredBlocks] = useState<Set<string>>(new Set()); // Track blocks that have expired
   const [email, setEmail] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [showStartScreen, setShowStartScreen] = useState(true);
+  const [showConsentScreen, setShowConsentScreen] = useState(false);
+  const [consentGiven, setConsentGiven] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [integrityViolations, setIntegrityViolations] = useState<{
     copyAttempts: number;
@@ -74,7 +78,16 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
     copyAttempts: 0,
     pasteAttempts: [],
   });
+  const [proctoringViolations, setProctoringViolations] = useState<{
+    lookAway: Array<{ timestamp: string }>;
+    multipleFaces: Array<{ timestamp: string }>;
+  }>({
+    lookAway: [],
+    multipleFaces: [],
+  });
   const [violationNotification, setViolationNotification] = useState<string | null>(null);
+  const [showTimeUpModal, setShowTimeUpModal] = useState(false);
+  const [timeUpIsLastBlock, setTimeUpIsLastBlock] = useState(false);
 
   // Fetch assessment by public URL
   const { data: assessmentData, isLoading, error } = useQuery<Assessment & { blocks: Block[] }>({
@@ -167,6 +180,19 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
       
       console.log(`[AssessmentTaker] Submitting ${responseData.length} responses`);
 
+      // Prepare integrity violations including proctoring
+      const hasViolations = integrityViolations.copyAttempts > 0 || integrityViolations.pasteAttempts.length > 0;
+      const hasProctoringViolations = proctoringViolations.lookAway.length > 0 || proctoringViolations.multipleFaces.length > 0;
+      
+      const integrityViolationsData: any = {};
+      if (hasViolations) {
+        integrityViolationsData.copyAttempts = integrityViolations.copyAttempts;
+        integrityViolationsData.pasteAttempts = integrityViolations.pasteAttempts;
+      }
+      if (hasProctoringViolations) {
+        integrityViolationsData.proctoring = proctoringViolations;
+      }
+
       const res = await fetch(`/api/assessment/${publicUrl}/submit`, {
         method: "POST",
         headers: {
@@ -178,9 +204,7 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
           lastName: lastName || null,
           name: firstName && lastName ? `${firstName} ${lastName}` : firstName || lastName || null, // Legacy field
           responses: responseData,
-          integrityViolations: integrityViolations.copyAttempts > 0 || integrityViolations.pasteAttempts.length > 0
-            ? integrityViolations
-            : undefined,
+          integrityViolations: (hasViolations || hasProctoringViolations) ? integrityViolationsData : undefined,
         }),
       });
 
@@ -244,6 +268,11 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
 
   const isFirstBlock = currentBlockIndex === 0;
   const isLastBlock = getNextBlockIndex(currentBlockIndex) === currentBlockIndex;
+  
+  // Check if previous block has expired
+  const prevBlockIndex = !isFirstBlock ? getPreviousBlockIndex(currentBlockIndex) : -1;
+  const prevBlock = prevBlockIndex >= 0 ? blocks[prevBlockIndex] : null;
+  const isPreviousBlockExpired = prevBlock?.id ? expiredBlocks.has(prevBlock.id) : false;
 
   // Timer for blocks with time limits
   useEffect(() => {
@@ -258,10 +287,14 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
           const remaining = (prev[currentBlock.id || ''] || currentBlock.timeLimitSeconds!) - 1;
           if (remaining <= 0) {
             clearInterval(timer);
-            const nextIdx = getNextBlockIndex(currentBlockIndex);
-            if (nextIdx !== currentBlockIndex) {
-              setCurrentBlockIndex(nextIdx);
+            // Mark this block as expired
+            if (currentBlock.id) {
+              setExpiredBlocks(prev => new Set(prev).add(currentBlock.id!));
             }
+            const nextIdx = getNextBlockIndex(currentBlockIndex);
+            const isLast = nextIdx === currentBlockIndex;
+            setTimeUpIsLastBlock(isLast);
+            setShowTimeUpModal(true);
             return { ...prev, [currentBlock.id || '']: 0 };
           }
           return { ...prev, [currentBlock.id || '']: remaining };
@@ -282,11 +315,22 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
   const handlePrevious = () => {
     if (!isFirstBlock) {
       const prevIdx = getPreviousBlockIndex(currentBlockIndex);
+      const prevBlock = blocks[prevIdx];
+      // Prevent going back to expired blocks
+      if (prevBlock?.id && expiredBlocks.has(prevBlock.id)) {
+        alert("You cannot go back to a question that has already expired.");
+        return;
+      }
       setCurrentBlockIndex(prevIdx);
     }
   };
 
   const updateResponse = (blockId: string, value: any) => {
+    // Prevent updating responses for expired blocks
+    if (expiredBlocks.has(blockId)) {
+      console.warn("Attempted to update response for expired block:", blockId);
+      return;
+    }
     setResponses(prev => ({ ...prev, [blockId]: value }));
   };
 
@@ -706,11 +750,79 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
                 return;
               }
               setShowStartScreen(false);
+              setShowConsentScreen(true);
             }}
             className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
           >
-            Start Assessment
+            Continue
           </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (showConsentScreen) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-lg shadow-lg p-8 max-w-2xl w-full">
+          <h1 className="text-3xl font-bold text-gray-900 mb-4">Proctoring Consent</h1>
+          
+          <div className="space-y-4 mb-6">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <p className="text-sm text-blue-800 mb-3">
+                <strong>Important:</strong> This assessment uses proctoring technology to ensure assessment integrity.
+              </p>
+              <div className="space-y-2 text-sm text-blue-800">
+                <p>• Your video feed will be monitored during the assessment for proctoring purposes</p>
+                <p>• Your audio feed may also be monitored during the assessment</p>
+                <p>• Your video and/or audio may be stored for fraud prevention purposes</p>
+              </div>
+            </div>
+
+            <div className="border border-gray-300 rounded-lg p-4">
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={consentGiven}
+                  onChange={(e) => setConsentGiven(e.target.checked)}
+                  className="mt-1 w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-gray-900">
+                    I acknowledge and authorize Invisible Technologies to record video and/or audio during this assessment for proctoring and fraud prevention purposes.
+                  </p>
+                  <p className="text-xs text-gray-600 mt-1">
+                    By checking this box, you consent to the recording and storage of your video and/or audio feed as described above.
+                  </p>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              onClick={() => {
+                setShowConsentScreen(false);
+                setShowStartScreen(true);
+              }}
+              className="flex-1 px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-medium"
+            >
+              Back
+            </button>
+            <button
+              onClick={() => {
+                if (!consentGiven) {
+                  alert("Please acknowledge and authorize the recording by checking the consent box");
+                  return;
+                }
+                setShowConsentScreen(false);
+              }}
+              disabled={!consentGiven}
+              className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:bg-gray-300 disabled:cursor-not-allowed"
+            >
+              Start Assessment
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -720,8 +832,58 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
     return null;
   }
 
+  // Handle time up modal actions
+  const handleTimeUpContinue = () => {
+    setShowTimeUpModal(false);
+    const nextIdx = getNextBlockIndex(currentBlockIndex);
+    if (nextIdx !== currentBlockIndex) {
+      setCurrentBlockIndex(nextIdx);
+    }
+  };
+
+  const handleTimeUpSubmit = () => {
+    setShowTimeUpModal(false);
+    submitAssessment.mutate();
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
+      {/* Time Up Modal */}
+      {showTimeUpModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]">
+          <div className="bg-white rounded-lg shadow-xl p-8 max-w-md mx-4">
+            <div className="text-center">
+              <div className="text-6xl mb-4">⏱️</div>
+              <h2 className="text-2xl font-bold text-gray-900 mb-4">Time's Up!</h2>
+              {timeUpIsLastBlock ? (
+                <>
+                  <p className="text-gray-600 mb-6">
+                    Your time for this question has expired. The assessment will now be submitted.
+                  </p>
+                  <button
+                    onClick={handleTimeUpSubmit}
+                    className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+                  >
+                    Submit Assessment
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p className="text-gray-600 mb-6">
+                    Your time for this question has expired. We'll now move to the next question.
+                  </p>
+                  <button
+                    onClick={handleTimeUpContinue}
+                    className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+                  >
+                    Continue to Next Question
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       {/* Header */}
       <div className="bg-white border-b border-gray-200 px-6 py-4">
         <div className="max-w-4xl mx-auto">
@@ -886,9 +1048,9 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <button
             onClick={handlePrevious}
-            disabled={isFirstBlock}
+            disabled={isFirstBlock || isPreviousBlockExpired}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg ${
-              isFirstBlock
+              isFirstBlock || isPreviousBlockExpired
                 ? "bg-gray-100 text-gray-400 cursor-not-allowed"
                 : "bg-gray-200 text-gray-700 hover:bg-gray-300"
             }`}
@@ -948,6 +1110,29 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
           )}
         </div>
       </div>
+
+      {/* Proctoring Camera */}
+      {!showStartScreen && !showConsentScreen && !submitted && currentBlock?.type !== "video_response" && (
+        <ProctoringCamera
+          key={`camera-${consentGiven ? 'active' : 'inactive'}-${currentBlock?.id}`}
+          isActive={!showStartScreen && !showConsentScreen && !submitted && currentBlock?.type !== "video_response"}
+          blockId={currentBlock?.id}
+          consentGiven={consentGiven}
+          onViolation={(type, timestamp) => {
+            if (type === "lookAway") {
+              setProctoringViolations((prev) => ({
+                ...prev,
+                lookAway: [...prev.lookAway, { timestamp: timestamp.toISOString() }],
+              }));
+            } else if (type === "multipleFaces") {
+              setProctoringViolations((prev) => ({
+                ...prev,
+                multipleFaces: [...prev.multipleFaces, { timestamp: timestamp.toISOString() }],
+              }));
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -171,6 +171,10 @@ export const assessmentSubmissions = pgTable("assessment_submissions", {
       timestamp: string;
       attemptedContent: string; // What they tried to paste
     }>;
+    proctoring?: {
+      lookAway?: Array<{ timestamp: string }>; // Look away violations
+      multipleFaces?: Array<{ timestamp: string }>; // Multiple faces detected
+    };
   }>().notNull().default({}),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
