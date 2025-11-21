@@ -749,8 +749,15 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
                 alert("Please enter your last name");
                 return;
               }
-              setShowStartScreen(false);
-              setShowConsentScreen(true);
+              // Only show consent screen if proctoring is enabled
+              if (assessmentData.settings?.enableProctoring === true) {
+                setShowStartScreen(false);
+                setShowConsentScreen(true);
+              } else {
+                // Skip consent screen if proctoring is disabled
+                setShowStartScreen(false);
+                setConsentGiven(true); // Set to true so camera won't show
+              }
             }}
             className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
           >
@@ -1111,8 +1118,19 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
         </div>
       </div>
 
-      {/* Proctoring Camera */}
-      {!showStartScreen && !showConsentScreen && !submitted && currentBlock?.type !== "video_response" && (
+      {/* Proctoring Camera - Only show if enabled in assessment settings */}
+      {!showStartScreen && !showConsentScreen && !submitted && currentBlock?.type !== "video_response" && 
+       (() => {
+         const proctoringEnabled = assessmentData?.settings?.enableProctoring === true;
+         if (process.env.NODE_ENV === "development") {
+           console.log("[AssessmentTaker] Proctoring check:", {
+             enableProctoring: assessmentData?.settings?.enableProctoring,
+             proctoringEnabled,
+             settings: assessmentData?.settings
+           });
+         }
+         return proctoringEnabled;
+       })() && (
         <ProctoringCamera
           key={`camera-${consentGiven ? 'active' : 'inactive'}-${currentBlock?.id}`}
           isActive={!showStartScreen && !showConsentScreen && !submitted && currentBlock?.type !== "video_response"}

@@ -593,6 +593,45 @@ export async function registerRoutes(app: Express): Promise<void> {
     }
   });
 
+  // Update assessment settings - MUST be before /assessments/:id route
+  // Using a more specific path pattern to ensure it matches before the general route
+  adminRouter.put("/assessments/:id/settings", async (req: any, res, next) => {
+    console.log("[Routes] Settings endpoint hit:", req.method, req.path, req.params.id, req.body);
+    try {
+      const assessmentId = req.params.id;
+      const clientId = req.user.clientId;
+      const { settings } = req.body;
+
+      if (!settings || typeof settings !== "object") {
+        return res.status(400).json({ error: "Settings object is required" });
+      }
+
+      // Get current assessment to merge settings
+      const currentAssessment = await storage.getAssessment(assessmentId, clientId);
+      if (!currentAssessment) {
+        return res.status(404).json({ error: "Assessment not found" });
+      }
+
+      // Merge new settings with existing settings
+      const updatedSettings = {
+        ...currentAssessment.settings,
+        ...settings,
+      };
+
+      const assessment = await storage.updateAssessment(assessmentId, clientId, {
+        settings: updatedSettings,
+      });
+
+      res.json(assessment);
+    } catch (error: any) {
+      console.error("[Routes] Error updating assessment settings:", error);
+      res.status(500).json({ 
+        error: "Failed to update assessment settings",
+        details: process.env.NODE_ENV === "development" ? error?.message : undefined
+      });
+    }
+  });
+
   // Get single assessment with blocks
   adminRouter.get("/assessments/:id", async (req: any, res) => {
     try {

@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Folder, FolderPlus, FileText, Plus, ChevronRight, ChevronDown, Trash2, Edit2, Menu, X } from "lucide-react";
+import { Folder, FolderPlus, FileText, Plus, ChevronRight, ChevronDown, Trash2, Edit2, Menu, X, Settings } from "lucide-react";
 import type { Campaign, Project, Assessment } from "@shared/schema";
+import AssessmentSettingsModal from "./AssessmentSettingsModal";
 
 interface DeleteConfirmState {
   type: "campaign" | "project" | "assessment";
@@ -27,6 +28,7 @@ export default function ProjectManager({ onSelectAssessment }: ProjectManagerPro
   const [newAssessmentName, setNewAssessmentName] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirmState | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [settingsAssessment, setSettingsAssessment] = useState<Assessment | null>(null);
 
   const queryClient = useQueryClient();
 
@@ -650,6 +652,16 @@ export default function ProjectManager({ onSelectAssessment }: ProjectManagerPro
                                   <button
                                     onClick={(e) => {
                                       e.stopPropagation();
+                                      setSettingsAssessment(assessment);
+                                    }}
+                                    className="opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-100 rounded text-gray-600 hover:text-gray-700 transition-opacity"
+                                    title="Assessment settings"
+                                  >
+                                    <Settings className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
                                       setDeleteConfirm({ type: "assessment", id: assessment.id, name: assessment.name });
                                     }}
                                     className="delete-btn opacity-0 group-hover:opacity-100 p-1 hover:bg-red-50 rounded text-red-600 hover:text-red-700 transition-opacity"
@@ -682,6 +694,14 @@ export default function ProjectManager({ onSelectAssessment }: ProjectManagerPro
             <p className="text-sm">Create campaigns, projects, and assessments to organize your work</p>
           </div>
         </div>
+      )}
+
+      {/* Assessment Settings Modal */}
+      {settingsAssessment && (
+        <AssessmentSettingsModal
+          assessment={settingsAssessment}
+          onClose={() => setSettingsAssessment(null)}
+        />
       )}
 
       {/* Delete Confirmation Modal */}

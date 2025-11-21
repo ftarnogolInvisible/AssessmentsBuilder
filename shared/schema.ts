@@ -87,6 +87,7 @@ export const assessments = pgTable("assessments", {
     requireName?: boolean;
     showProgress?: boolean;
     autosaveInterval?: number; // milliseconds
+    enableProctoring?: boolean; // Enable/disable video proctoring camera
   }>().notNull().default({}),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
