@@ -691,10 +691,26 @@ export default function ReviewerView({ submission, assessmentId, onClose }: Revi
                           <p className="text-sm font-medium text-amber-800 mb-2">
                             Look Away Violations: {violations.proctoring.lookAway.length}
                           </p>
-                          <div className="space-y-1 max-h-32 overflow-y-auto">
+                          <div className="space-y-2 max-h-64 overflow-y-auto">
                             {violations.proctoring.lookAway.map((violation: any, idx: number) => (
-                              <div key={idx} className="text-xs text-amber-700 pl-2">
-                                {new Date(violation.timestamp).toLocaleString()}
+                              <div key={idx} className="flex items-start gap-2">
+                                <div className="text-xs text-amber-700 flex-shrink-0 pt-1">
+                                  {new Date(violation.timestamp).toLocaleString()}
+                                </div>
+                                {violation.screenshot && (
+                                  <img 
+                                    src={violation.screenshot} 
+                                    alt={`Look away violation ${idx + 1}`}
+                                    className="w-20 h-20 object-cover rounded border border-amber-300 cursor-pointer hover:opacity-80 transition-opacity flex-shrink-0"
+                                    onClick={() => {
+                                      const newWindow = window.open();
+                                      if (newWindow) {
+                                        newWindow.document.write(`<img src="${violation.screenshot}" style="max-width: 100%; height: auto;" />`);
+                                      }
+                                    }}
+                                    title="Click to view full size"
+                                  />
+                                )}
                               </div>
                             ))}
                           </div>
@@ -705,10 +721,26 @@ export default function ReviewerView({ submission, assessmentId, onClose }: Revi
                           <p className="text-sm font-medium text-red-800 mb-2">
                             Multiple Faces Detected: {violations.proctoring.multipleFaces.length}
                           </p>
-                          <div className="space-y-1 max-h-32 overflow-y-auto">
+                          <div className="space-y-2 max-h-64 overflow-y-auto">
                             {violations.proctoring.multipleFaces.map((violation: any, idx: number) => (
-                              <div key={idx} className="text-xs text-red-700 pl-2">
-                                {new Date(violation.timestamp).toLocaleString()}
+                              <div key={idx} className="flex items-start gap-2">
+                                <div className="text-xs text-red-700 flex-shrink-0 pt-1">
+                                  {new Date(violation.timestamp).toLocaleString()}
+                                </div>
+                                {violation.screenshot && (
+                                  <img 
+                                    src={violation.screenshot} 
+                                    alt={`Multiple faces violation ${idx + 1}`}
+                                    className="w-20 h-20 object-cover rounded border border-red-300 cursor-pointer hover:opacity-80 transition-opacity flex-shrink-0"
+                                    onClick={() => {
+                                      const newWindow = window.open();
+                                      if (newWindow) {
+                                        newWindow.document.write(`<img src="${violation.screenshot}" style="max-width: 100%; height: auto;" />`);
+                                      }
+                                    }}
+                                    title="Click to view full size"
+                                  />
+                                )}
                               </div>
                             ))}
                           </div>

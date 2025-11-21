@@ -79,8 +79,8 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
     pasteAttempts: [],
   });
   const [proctoringViolations, setProctoringViolations] = useState<{
-    lookAway: Array<{ timestamp: string }>;
-    multipleFaces: Array<{ timestamp: string }>;
+    lookAway: Array<{ timestamp: string; screenshot?: string }>;
+    multipleFaces: Array<{ timestamp: string; screenshot?: string }>;
   }>({
     lookAway: [],
     multipleFaces: [],
@@ -1118,16 +1118,22 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
           isActive={!showStartScreen && !showConsentScreen && !submitted && currentBlock?.type !== "video_response"}
           blockId={currentBlock?.id}
           consentGiven={consentGiven}
-          onViolation={(type, timestamp) => {
+          onViolation={(type, timestamp, screenshot) => {
             if (type === "lookAway") {
               setProctoringViolations((prev) => ({
                 ...prev,
-                lookAway: [...prev.lookAway, { timestamp: timestamp.toISOString() }],
+                lookAway: [...prev.lookAway, { 
+                  timestamp: timestamp.toISOString(),
+                  ...(screenshot && { screenshot })
+                }],
               }));
             } else if (type === "multipleFaces") {
               setProctoringViolations((prev) => ({
                 ...prev,
-                multipleFaces: [...prev.multipleFaces, { timestamp: timestamp.toISOString() }],
+                multipleFaces: [...prev.multipleFaces, { 
+                  timestamp: timestamp.toISOString(),
+                  ...(screenshot && { screenshot })
+                }],
               }));
             }
           }}

@@ -20,7 +20,7 @@ interface ProctoringCameraProps {
   isActive?: boolean;
   blockId?: string; // Block ID to trigger re-initialization when block changes
   consentGiven?: boolean; // Whether user has given consent (triggers initialization)
-  onViolation?: (type: "lookAway" | "multipleFaces", timestamp: Date) => void;
+  onViolation?: (type: "lookAway" | "multipleFaces", timestamp: Date, screenshot?: string) => void;
 }
 
 export default function ProctoringCamera({ isActive: propIsActive = true, blockId, consentGiven, onViolation }: ProctoringCameraProps) {
@@ -32,6 +32,7 @@ export default function ProctoringCamera({ isActive: propIsActive = true, blockI
   const [violationCount, setViolationCount] = useState({ lookAway: 0, multipleFaces: 0 });
   const [showAlert, setShowAlert] = useState(false);
   const [alertMessage, setAlertMessage] = useState("");
+  const screenshotCountRef = useRef(0); // Track number of screenshots taken (max 6)
   const isAlertActiveRef = useRef(false);
   const alertEndTimeRef = useRef(0);
   
@@ -313,6 +314,70 @@ export default function ProctoringCamera({ isActive: propIsActive = true, blockI
         return;
       }
 
+      // Function to capture screenshot from video feed (max 640p resolution)
+      function captureScreenshot(): string | null {
+        if (screenshotCountRef.current >= 6) {
+          console.log("[ProctoringCamera] Maximum screenshot limit reached (6)");
+          return null;
+        }
+        
+        if (!videoElement || videoElement.readyState < 2) {
+          console.log("[ProctoringCamera] Video not ready for screenshot");
+          return null;
+        }
+
+        try {
+          // Create a canvas to capture the video frame
+          const captureCanvas = document.createElement("canvas");
+          const videoWidth = videoElement.videoWidth;
+          const videoHeight = videoElement.videoHeight;
+          
+          if (!videoWidth || !videoHeight) {
+            console.log("[ProctoringCamera] Video dimensions not available");
+            return null;
+          }
+
+          // Calculate dimensions (max 640p - maintain aspect ratio)
+          const maxWidth = 640;
+          const maxHeight = 640;
+          let width = videoWidth;
+          let height = videoHeight;
+          
+          // Scale down if needed while maintaining aspect ratio
+          if (width > maxWidth || height > maxHeight) {
+            const aspectRatio = width / height;
+            if (width > height) {
+              width = maxWidth;
+              height = Math.round(maxWidth / aspectRatio);
+            } else {
+              height = maxHeight;
+              width = Math.round(maxHeight * aspectRatio);
+            }
+          }
+
+          captureCanvas.width = width;
+          captureCanvas.height = height;
+          const ctx = captureCanvas.getContext("2d");
+          
+          if (!ctx) {
+            console.error("[ProctoringCamera] Failed to get canvas context for screenshot");
+            return null;
+          }
+
+          // Draw video frame to canvas
+          ctx.drawImage(videoElement, 0, 0, width, height);
+          
+          // Convert to base64 data URL
+          const screenshot = captureCanvas.toDataURL("image/jpeg", 0.85); // JPEG with 85% quality
+          screenshotCountRef.current += 1;
+          console.log(`[ProctoringCamera] Screenshot captured (${screenshotCountRef.current}/6)`);
+          return screenshot;
+        } catch (error) {
+          console.error("[ProctoringCamera] Error capturing screenshot:", error);
+          return null;
+        }
+      }
+
       // Define onResults function with access to all needed variables
       function onResults(results: any) {
         if (!meshCtx) return;
@@ -338,7 +403,12 @@ export default function ProctoringCamera({ isActive: propIsActive = true, blockI
             setShowAlert(true);
             setAlertMessage("Multiple faces detected!");
             setViolationCount((prev) => ({ ...prev, multipleFaces: prev.multipleFaces + 1 }));
-            onViolationRef.current?.("multipleFaces", new Date());
+            
+            // Capture screenshot if we haven't reached the limit
+            const screenshot = captureScreenshot();
+            const violationTimestamp = new Date();
+            onViolationRef.current?.("multipleFaces", violationTimestamp, screenshot || undefined);
+            
             isAlertActiveRef.current = true;
             alertEndTimeRef.current = Date.now() + 2000;
           }
@@ -452,7 +522,11 @@ export default function ProctoringCamera({ isActive: propIsActive = true, blockI
                 setShowAlert(true);
                 setAlertMessage("Please do not look away from the screen");
                 setViolationCount((prev) => ({ ...prev, lookAway: prev.lookAway + 1 }));
-                onViolationRef.current?.("lookAway", new Date());
+                
+                // Capture screenshot if we haven't reached the limit
+                const screenshot = captureScreenshot();
+                const violationTimestamp = new Date();
+                onViolationRef.current?.("lookAway", violationTimestamp, screenshot || undefined);
               }
               isAlertActiveRef.current = true;
               alertEndTimeRef.current = Date.now() + ALERT_DURATION;
