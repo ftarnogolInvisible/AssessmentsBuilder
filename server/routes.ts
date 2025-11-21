@@ -2,7 +2,9 @@ import type { Express } from "express";
 import { Router } from "express";
 import { storage } from "./storage";
 import { authenticateToken } from "./middleware/auth";
+import { authenticateApiKey, requirePermission } from "./middleware/apiKeyAuth";
 import { configureCORS, configureHelmet, publicRateLimit, adminRateLimit } from "./middleware/security";
+import { webhookService } from "./services/webhookService";
 
 export async function registerRoutes(app: Express): Promise<void> {
   console.log('[BOOT] Routes file loaded');
@@ -225,7 +227,23 @@ export async function registerRoutes(app: Express): Promise<void> {
 
       console.log("[Routes] Submission completed successfully:", submission.id);
 
-      // TODO: Trigger webhook if configured
+      // Trigger webhooks for all active API keys with webhook URLs
+      try {
+        const apiKeys = await storage.getApiKeys(assessment.clientId);
+        const activeApiKeys = apiKeys.filter(
+          (key) => key.active && key.webhookUrl && !key.expiresAt || (key.expiresAt && new Date(key.expiresAt) > new Date())
+        );
+
+        for (const apiKey of activeApiKeys) {
+          const blockResponses = await storage.getBlockResponses(submission.id);
+          webhookService.triggerSubmissionWebhook(apiKey, submission, assessment, blockResponses).catch((error) => {
+            console.error(`[Routes] Failed to trigger webhook for API key ${apiKey.id}:`, error);
+          });
+        }
+      } catch (webhookError) {
+        // Don't fail the submission if webhook fails
+        console.error("[Routes] Error triggering webhooks:", webhookError);
+      }
 
       res.json({ success: true, submissionId: submission.id });
     } catch (error: any) {
@@ -842,6 +860,286 @@ export async function registerRoutes(app: Express): Promise<void> {
     }
   });
 
-  // More routes will be added in subsequent phases...
+  // =============================================================================
+  // API KEY MANAGEMENT ROUTES (Admin)
+  // =============================================================================
+
+  adminRouter.get("/api-keys", async (req: any, res) => {
+    try {
+      const clientId = req.user.clientId;
+      const keys = await storage.getApiKeys(clientId);
+      // Don't return plain keys - they're only shown once on creation
+      const sanitizedKeys = keys.map((key) => ({
+        ...key,
+        keyHash: undefined, // Don't expose hash
+      }));
+      res.json(sanitizedKeys);
+    } catch (error: any) {
+      console.error("[Routes] Error fetching API keys:", error);
+      res.status(500).json({ 
+        error: "Failed to fetch API keys",
+        details: process.env.NODE_ENV === "development" ? error?.message : undefined
+      });
+    }
+  });
+
+  adminRouter.post("/api-keys", async (req: any, res) => {
+    try {
+      const clientId = req.user.clientId;
+      const { name, permissions, webhookUrl, expiresAt } = req.body;
+
+      const { apiKey, plainKey } = await storage.createApiKey({
+        clientId,
+        name: name || "Untitled API Key",
+        permissions: Array.isArray(permissions) ? permissions : [],
+        webhookUrl: webhookUrl || null,
+        active: true,
+        expiresAt: expiresAt ? new Date(expiresAt) : null,
+      });
+
+      // Return API key with plain key (only shown once)
+      res.json({
+        ...apiKey,
+        keyHash: undefined, // Don't expose hash
+        plainKey, // Only returned on creation
+      });
+    } catch (error: any) {
+      console.error("[Routes] Error creating API key:", error);
+      res.status(500).json({ 
+        error: "Failed to create API key",
+        details: process.env.NODE_ENV === "development" ? error?.message : undefined
+      });
+    }
+  });
+
+  adminRouter.get("/api-keys/:id", async (req: any, res) => {
+    try {
+      const clientId = req.user.clientId;
+      const apiKey = await storage.getApiKey(req.params.id, clientId);
+      if (!apiKey) {
+        return res.status(404).json({ error: "API key not found" });
+      }
+      res.json({
+        ...apiKey,
+        keyHash: undefined, // Don't expose hash
+      });
+    } catch (error: any) {
+      console.error("[Routes] Error fetching API key:", error);
+      res.status(500).json({ 
+        error: "Failed to fetch API key",
+        details: process.env.NODE_ENV === "development" ? error?.message : undefined
+      });
+    }
+  });
+
+  adminRouter.put("/api-keys/:id", async (req: any, res) => {
+    try {
+      const clientId = req.user.clientId;
+      const { name, permissions, webhookUrl, active, expiresAt } = req.body;
+
+      const apiKey = await storage.updateApiKey(req.params.id, clientId, {
+        name,
+        permissions,
+        webhookUrl,
+        active,
+        expiresAt: expiresAt ? new Date(expiresAt) : undefined,
+      });
+
+      res.json({
+        ...apiKey,
+        keyHash: undefined, // Don't expose hash
+      });
+    } catch (error: any) {
+      console.error("[Routes] Error updating API key:", error);
+      res.status(500).json({ 
+        error: "Failed to update API key",
+        details: process.env.NODE_ENV === "development" ? error?.message : undefined
+      });
+    }
+  });
+
+  adminRouter.delete("/api-keys/:id", async (req: any, res) => {
+    try {
+      const clientId = req.user.clientId;
+      await storage.deleteApiKey(req.params.id, clientId);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("[Routes] Error deleting API key:", error);
+      res.status(500).json({ 
+        error: "Failed to delete API key",
+        details: process.env.NODE_ENV === "development" ? error?.message : undefined
+      });
+    }
+  });
+
+  adminRouter.get("/api-keys/:id/webhooks", async (req: any, res) => {
+    try {
+      const clientId = req.user.clientId;
+      const apiKey = await storage.getApiKey(req.params.id, clientId);
+      if (!apiKey) {
+        return res.status(404).json({ error: "API key not found" });
+      }
+
+      const events = await storage.getWebhookEvents(req.params.id, 100);
+      res.json(events);
+    } catch (error: any) {
+      console.error("[Routes] Error fetching webhook events:", error);
+      res.status(500).json({ 
+        error: "Failed to fetch webhook events",
+        details: process.env.NODE_ENV === "development" ? error?.message : undefined
+      });
+    }
+  });
+
+  // =============================================================================
+  // N8N-COMPATIBLE API ROUTES (API Key Auth)
+  // =============================================================================
+
+  const apiRouter = Router();
+  apiRouter.use(authenticateApiKey);
+
+  // Get assessments
+  apiRouter.get("/assessments", requirePermission("read:assessments"), async (req: any, res) => {
+    try {
+      const apiKey = req.apiKey;
+      const assessments = await storage.getAllAssessments(apiKey.clientId);
+      // Transform to n8n-compatible format
+      res.json({
+        data: assessments.map((a) => ({
+          id: a.id,
+          name: a.name,
+          description: a.description,
+          publicUrl: a.publicUrl,
+          status: a.status,
+          projectId: a.projectId,
+          createdAt: a.createdAt,
+          updatedAt: a.updatedAt,
+        })),
+      });
+    } catch (error: any) {
+      console.error("[API] Error fetching assessments:", error);
+      res.status(500).json({ error: "Failed to fetch assessments" });
+    }
+  });
+
+  // Get submissions
+  apiRouter.get("/submissions", requirePermission("read:submissions"), async (req: any, res) => {
+    try {
+      const apiKey = req.apiKey;
+      const { assessmentId, status, limit = 100 } = req.query;
+      
+      let submissions = await storage.getAllSubmissions(apiKey.clientId);
+      
+      if (assessmentId) {
+        submissions = submissions.filter((s) => s.assessmentId === assessmentId);
+      }
+      
+      if (status) {
+        submissions = submissions.filter((s) => s.status === status);
+      }
+
+      submissions = submissions.slice(0, parseInt(limit as string, 10));
+
+      res.json({
+        data: submissions.map((s) => ({
+          id: s.id,
+          assessmentId: s.assessmentId,
+          email: s.email,
+          firstName: s.firstName,
+          lastName: s.lastName,
+          status: s.status,
+          progress: s.progress,
+          totalScore: s.totalScore,
+          maxScore: s.maxScore,
+          submittedAt: s.submittedAt,
+          createdAt: s.createdAt,
+        })),
+      });
+    } catch (error: any) {
+      console.error("[API] Error fetching submissions:", error);
+      res.status(500).json({ error: "Failed to fetch submissions" });
+    }
+  });
+
+  // Get single submission with responses
+  apiRouter.get("/submissions/:id", requirePermission("read:submissions"), async (req: any, res) => {
+    try {
+      const apiKey = req.apiKey;
+      const submission = await storage.getSubmission(req.params.id, apiKey.clientId);
+      if (!submission) {
+        return res.status(404).json({ error: "Submission not found" });
+      }
+
+      const responses = await storage.getBlockResponses(submission.id);
+      const assessment = await storage.getAssessment(submission.assessmentId, apiKey.clientId);
+
+      res.json({
+        data: {
+          ...submission,
+          assessment,
+          responses,
+        },
+      });
+    } catch (error: any) {
+      console.error("[API] Error fetching submission:", error);
+      res.status(500).json({ error: "Failed to fetch submission" });
+    }
+  });
+
+  // Update submission score (for AI grading)
+  apiRouter.put("/submissions/:id/score", requirePermission("write:scores"), async (req: any, res) => {
+    try {
+      const apiKey = req.apiKey;
+      const { totalScore, responses } = req.body;
+
+      const submission = await storage.getSubmission(req.params.id, apiKey.clientId);
+      if (!submission) {
+        return res.status(404).json({ error: "Submission not found" });
+      }
+
+      // Update submission total score
+      if (totalScore !== undefined) {
+        await storage.updateAssessmentSubmission(submission.id, {
+          totalScore,
+          status: "reviewed",
+        });
+      }
+
+      // Update individual block response scores
+      if (Array.isArray(responses)) {
+        for (const response of responses) {
+          if (response.id && response.score !== undefined) {
+            await storage.updateBlockResponse(response.id, {
+              score: response.score,
+              autoGraded: true,
+            });
+          }
+        }
+      }
+
+      const updatedSubmission = await storage.getSubmission(req.params.id, apiKey.clientId);
+      const updatedResponses = await storage.getBlockResponses(submission.id);
+
+      res.json({
+        data: {
+          ...updatedSubmission,
+          responses: updatedResponses,
+        },
+      });
+    } catch (error: any) {
+      console.error("[API] Error updating submission score:", error);
+      res.status(500).json({ error: "Failed to update submission score" });
+    }
+  });
+
+  // Health check for API
+  apiRouter.get("/health", async (_req, res) => {
+    res.json({ status: "ok", timestamp: new Date().toISOString() });
+  });
+
+  // Mount API router
+  app.use("/api/v1", apiRouter);
+
+  console.log("[Routes] Registered n8n-compatible API routes at /api/v1");
 }
 

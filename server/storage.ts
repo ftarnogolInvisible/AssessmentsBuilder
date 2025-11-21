@@ -29,9 +29,9 @@ import {
   type InsertClient,
 } from "../shared/schema";
 import { db } from "./db";
-import { eq, and, desc, asc, count } from "drizzle-orm";
+import { eq, and, desc, asc, count, or, lt } from "drizzle-orm";
 import { sql } from "drizzle-orm";
-import { randomUUID } from "crypto";
+import { randomUUID, createHash } from "crypto";
 
 export class Storage {
   // Utility method to clear all assessment data (for development)
@@ -181,6 +181,14 @@ export class Storage {
       .select()
       .from(assessments)
       .where(and(eq(assessments.projectId, projectId), eq(assessments.clientId, clientId), eq(assessments.archived, false)))
+      .orderBy(desc(assessments.updatedAt));
+  }
+
+  async getAllAssessments(clientId: string): Promise<Assessment[]> {
+    return await db
+      .select()
+      .from(assessments)
+      .where(and(eq(assessments.clientId, clientId), eq(assessments.archived, false)))
       .orderBy(desc(assessments.updatedAt));
   }
 
@@ -520,6 +528,174 @@ export class Storage {
       .from(blockResponses)
       .where(eq(blockResponses.submissionId, submissionId))
       .orderBy(asc(blockResponses.createdAt));
+  }
+
+  // =============================================================================
+  // API KEY METHODS
+  // =============================================================================
+
+  /**
+   * Hash an API key using SHA-256
+   */
+  private hashApiKey(key: string): string {
+    return createHash("sha256").update(key).digest("hex");
+  }
+
+  /**
+   * Generate a new API key
+   */
+  generateApiKey(): string {
+    return `ak_${randomUUID().replace(/-/g, "")}${randomUUID().replace(/-/g, "").substring(0, 16)}`;
+  }
+
+  async createApiKey(insertApiKey: Omit<InsertApiKey, "keyHash"> & { plainKey?: string }): Promise<{ apiKey: ApiKey; plainKey: string }> {
+    const plainKey = insertApiKey.plainKey || this.generateApiKey();
+    const keyHash = this.hashApiKey(plainKey);
+    
+    const apiKeyData: InsertApiKey = {
+      ...insertApiKey,
+      keyHash,
+    };
+
+    const [apiKey] = await db.insert(apiKeys).values([apiKeyData]).returning();
+    return { apiKey, plainKey };
+  }
+
+  async getApiKey(id: string, clientId: string): Promise<ApiKey | undefined> {
+    const [apiKey] = await db
+      .select()
+      .from(apiKeys)
+      .where(and(eq(apiKeys.id, id), eq(apiKeys.clientId, clientId)));
+    return apiKey || undefined;
+  }
+
+  async getApiKeyByHash(keyHash: string): Promise<ApiKey | undefined> {
+    const [apiKey] = await db
+      .select()
+      .from(apiKeys)
+      .where(eq(apiKeys.keyHash, keyHash));
+    return apiKey || undefined;
+  }
+
+  async getApiKeyById(id: string): Promise<ApiKey | undefined> {
+    const [apiKey] = await db
+      .select()
+      .from(apiKeys)
+      .where(eq(apiKeys.id, id));
+    return apiKey || undefined;
+  }
+
+  async validateApiKey(key: string): Promise<ApiKey | null> {
+    const keyHash = this.hashApiKey(key);
+    const apiKey = await this.getApiKeyByHash(keyHash);
+    
+    if (!apiKey) {
+      return null;
+    }
+
+    // Check if key is active
+    if (!apiKey.active) {
+      return null;
+    }
+
+    // Check if key is expired
+    if (apiKey.expiresAt && new Date(apiKey.expiresAt) < new Date()) {
+      return null;
+    }
+
+    // Update last used timestamp
+    await db
+      .update(apiKeys)
+      .set({ lastUsedAt: new Date(), updatedAt: new Date() })
+      .where(eq(apiKeys.id, apiKey.id));
+
+    return apiKey;
+  }
+
+  async getApiKeys(clientId: string): Promise<ApiKey[]> {
+    return await db
+      .select()
+      .from(apiKeys)
+      .where(eq(apiKeys.clientId, clientId))
+      .orderBy(desc(apiKeys.createdAt));
+  }
+
+  async updateApiKey(id: string, clientId: string, updates: Partial<Pick<ApiKey, "name" | "permissions" | "webhookUrl" | "active" | "expiresAt">>): Promise<ApiKey> {
+    const [apiKey] = await db
+      .update(apiKeys)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(and(eq(apiKeys.id, id), eq(apiKeys.clientId, clientId)))
+      .returning();
+    
+    if (!apiKey) {
+      throw new Error("API key not found");
+    }
+    
+    return apiKey;
+  }
+
+  async deleteApiKey(id: string, clientId: string): Promise<void> {
+    await db
+      .delete(apiKeys)
+      .where(and(eq(apiKeys.id, id), eq(apiKeys.clientId, clientId)));
+  }
+
+  // =============================================================================
+  // WEBHOOK EVENT METHODS
+  // =============================================================================
+
+  async createWebhookEvent(insertWebhookEvent: Omit<InsertWebhookEvent, "id">): Promise<WebhookEvent> {
+    const [event] = await db.insert(webhookEvents).values([insertWebhookEvent]).returning();
+    return event;
+  }
+
+  async getWebhookEvent(id: string): Promise<WebhookEvent | undefined> {
+    const [event] = await db
+      .select()
+      .from(webhookEvents)
+      .where(eq(webhookEvents.id, id));
+    return event || undefined;
+  }
+
+  async updateWebhookEvent(id: string, updates: Partial<Pick<WebhookEvent, "status" | "responseCode" | "responseBody" | "retryCount" | "sentAt">>): Promise<WebhookEvent> {
+    const [event] = await db
+      .update(webhookEvents)
+      .set(updates)
+      .where(eq(webhookEvents.id, id))
+      .returning();
+    
+    if (!event) {
+      throw new Error("Webhook event not found");
+    }
+    
+    return event;
+  }
+
+  async getPendingWebhookEvents(limit: number = 100): Promise<WebhookEvent[]> {
+    return await db
+      .select()
+      .from(webhookEvents)
+      .where(
+        and(
+          eq(webhookEvents.status, "pending"),
+          sql`${webhookEvents.retryCount} < 5` // Max 5 retries
+        )
+      )
+      .orderBy(asc(webhookEvents.createdAt))
+      .limit(limit);
+  }
+
+  async getWebhookEvents(apiKeyId?: string, limit: number = 100): Promise<WebhookEvent[]> {
+    const conditions = apiKeyId 
+      ? [eq(webhookEvents.apiKeyId, apiKeyId)]
+      : [];
+    
+    return await db
+      .select()
+      .from(webhookEvents)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(desc(webhookEvents.createdAt))
+      .limit(limit);
   }
 }
 
