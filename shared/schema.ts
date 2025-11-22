@@ -12,10 +12,16 @@ export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   username: text("username").notNull().unique(),
   email: text("email").notNull().unique(),
-  password: text("password").notNull(),
-  role: text("role").notNull().default("editor"), // owner, editor, reviewer
+  password: text("password"), // Nullable for Google OAuth users
+  role: text("role").notNull().default("viewer"), // owner, admin, editor, viewer
+  googleId: text("google_id").unique(), // For Google OAuth integration
+  googleEmail: text("google_email"), // For Google OAuth integration
+  firstName: text("first_name"),
+  lastName: text("last_name"),
+  avatarUrl: text("avatar_url"), // For Google profile picture
   twoFactorEnabled: boolean("two_factor_enabled").notNull().default(false),
   twoFactorSecret: text("two_factor_secret"),
+  active: boolean("active").notNull().default(true), // Can disable users without deleting
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -35,7 +41,32 @@ export const clientUsers = pgTable("client_users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   clientId: varchar("client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
   userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  role: text("role").notNull().default("editor"), // owner, editor, reviewer
+  role: text("role").notNull().default("viewer"), // owner, admin, editor, viewer
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// User access permissions - granular access control for assessments, projects, campaigns
+export const userAccessPermissions = pgTable("user_access_permissions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  clientId: varchar("client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
+  resourceType: text("resource_type").notNull(), // "campaign", "project", "assessment"
+  resourceId: varchar("resource_id").notNull(), // ID of the campaign, project, or assessment
+  permission: text("permission").notNull().default("view"), // "view", "edit", "review"
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// User invites - for email-based user invitations
+export const userInvites = pgTable("user_invites", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  email: text("email").notNull(),
+  clientId: varchar("client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
+  role: text("role").notNull().default("viewer"), // owner, admin, editor, viewer
+  invitedBy: varchar("invited_by").notNull().references(() => users.id, { onDelete: "cascade" }),
+  token: text("token").notNull().unique(), // Unique token for invite acceptance
+  expiresAt: timestamp("expires_at").notNull(), // Invite expiration (e.g., 7 days)
+  acceptedAt: timestamp("accepted_at"), // When the invite was accepted
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -88,6 +119,7 @@ export const assessments = pgTable("assessments", {
     showProgress?: boolean;
     autosaveInterval?: number; // milliseconds
     enableProctoring?: boolean; // Enable/disable video proctoring camera
+    requireFullScreen?: boolean; // Require full screen mode during assessment
   }>().notNull().default({}),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -176,6 +208,7 @@ export const assessmentSubmissions = pgTable("assessment_submissions", {
       lookAway?: Array<{ timestamp: string; screenshot?: string }>; // Look away violations with optional screenshot
       multipleFaces?: Array<{ timestamp: string; screenshot?: string }>; // Multiple faces detected with optional screenshot
     };
+    fullScreenExits?: Array<{ timestamp: string; reason: string }>; // Full screen exit violations: "exit", "visibility", "blur"
   }>().notNull().default({}),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -254,7 +287,7 @@ export const webhookEvents = pgTable("webhook_events", {
 // PLATFORM SETTINGS
 // =============================================================================
 
-// Platform settings - branding, domain, email templates
+// Platform settings - branding, domain, email templates, LLM config
 export const platformSettings = pgTable("platform_settings", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   clientId: varchar("client_id").notNull().unique().references(() => clients.id, { onDelete: "cascade" }),
@@ -270,6 +303,23 @@ export const platformSettings = pgTable("platform_settings", {
   }>().notNull().default({}),
   storageProvider: text("storage_provider").notNull().default("s3"), // s3, gcs, etc.
   storageConfig: json("storage_config").$type<Record<string, any>>().notNull().default({}),
+  llmConfig: json("llm_config").$type<{
+    openai?: {
+      apiKey?: string; // Encrypted
+      enabled?: boolean;
+      model?: string; // e.g., "gpt-4", "gpt-3.5-turbo"
+    };
+    googleGemini?: {
+      apiKey?: string; // Encrypted
+      enabled?: boolean;
+      model?: string; // e.g., "gemini-pro"
+    };
+    openRouter?: {
+      apiKey?: string; // Encrypted
+      enabled?: boolean;
+      defaultModel?: string; // e.g., "openai/gpt-4"
+    };
+  }>().notNull().default({}),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -282,6 +332,17 @@ export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
+});
+
+export const insertUserAccessPermissionSchema = createInsertSchema(userAccessPermissions).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertUserInviteSchema = createInsertSchema(userInvites).omit({
+  id: true,
+  createdAt: true,
 });
 
 export const insertClientSchema = createInsertSchema(clients).omit({
@@ -334,6 +395,12 @@ export const insertApiKeySchema = createInsertSchema(apiKeys).omit({
   lastUsedAt: true,
 });
 
+export const insertPlatformSettingsSchema = createInsertSchema(platformSettings).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 // =============================================================================
 // EXPORT TYPES
 // =============================================================================
@@ -358,4 +425,10 @@ export type ApiKey = typeof apiKeys.$inferSelect;
 export type InsertApiKey = z.infer<typeof insertApiKeySchema>;
 export type WebhookEvent = typeof webhookEvents.$inferSelect;
 export type InsertWebhookEvent = typeof webhookEvents.$inferInsert;
+export type PlatformSettings = typeof platformSettings.$inferSelect;
+export type InsertPlatformSettings = z.infer<typeof insertPlatformSettingsSchema>;
+export type UserAccessPermission = typeof userAccessPermissions.$inferSelect;
+export type InsertUserAccessPermission = typeof userAccessPermissions.$inferInsert;
+export type UserInvite = typeof userInvites.$inferSelect;
+export type InsertUserInvite = typeof userInvites.$inferInsert;
 

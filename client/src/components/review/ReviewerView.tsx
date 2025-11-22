@@ -604,7 +604,8 @@ export default function ReviewerView({ submission, assessmentId, onClose }: Revi
               (violations.proctoring.lookAway && violations.proctoring.lookAway.length > 0) ||
               (violations.proctoring.multipleFaces && violations.proctoring.multipleFaces.length > 0)
             );
-            const hasViolations = hasCopyAttempts || hasPasteAttempts || hasProctoringViolations;
+            const hasFullScreenViolations = violations && violations.fullScreenExits && violations.fullScreenExits.length > 0;
+            const hasViolations = hasCopyAttempts || hasPasteAttempts || hasProctoringViolations || hasFullScreenViolations;
             const hasViolationsData = violations !== null && violations !== undefined;
             
             // Debug: Log violations data
@@ -746,6 +747,38 @@ export default function ReviewerView({ submission, assessmentId, onClose }: Revi
                           </div>
                         </div>
                       )}
+                    </div>
+                  )}
+
+                  {/* Full Screen Exit Violations */}
+                  {violations.fullScreenExits && violations.fullScreenExits.length > 0 && (
+                    <div className="mt-4 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                      <div className="flex items-center gap-2 mb-3">
+                        <XCircle className="w-5 h-5 text-yellow-600" />
+                        <span className="font-medium text-yellow-900">Full Screen Exit Violations</span>
+                      </div>
+                      <p className="text-sm font-medium text-yellow-800 mb-2">
+                        Total Violations: {violations.fullScreenExits.length}
+                      </p>
+                      <div className="space-y-2 max-h-64 overflow-y-auto">
+                        {violations.fullScreenExits.map((violation: any, idx: number) => (
+                          <div key={idx} className="flex items-start gap-2 p-2 bg-white rounded border border-yellow-200">
+                            <div className="text-xs text-yellow-700 flex-shrink-0 pt-1">
+                              {new Date(violation.timestamp).toLocaleString()}
+                            </div>
+                            <div className="flex-1">
+                              <p className="text-xs text-yellow-800">
+                                <span className="font-medium">Reason:</span> {
+                                  violation.reason === "exit" ? "Exited full screen mode" :
+                                  violation.reason === "visibility" ? "Tab/window lost visibility (alt-tab)" :
+                                  violation.reason === "blur" ? "Window lost focus" :
+                                  violation.reason
+                                }
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
                   

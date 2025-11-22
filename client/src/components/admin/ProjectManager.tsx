@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Folder, FolderPlus, FileText, Plus, ChevronRight, ChevronDown, Trash2, Edit2, Menu, X, Settings } from "lucide-react";
+import { Folder, FolderPlus, FileText, Plus, ChevronRight, ChevronDown, Trash2, Edit2, Menu, X, Settings, Shield } from "lucide-react";
 import type { Campaign, Project, Assessment } from "@shared/schema";
 import AssessmentSettingsModal from "./AssessmentSettingsModal";
+import PlatformSettingsModal from "./PlatformSettingsModal";
+import UserManagementModal from "./UserManagementModal";
 
 interface DeleteConfirmState {
   type: "campaign" | "project" | "assessment";
@@ -29,6 +31,9 @@ export default function ProjectManager({ onSelectAssessment }: ProjectManagerPro
   const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirmState | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [settingsAssessment, setSettingsAssessment] = useState<Assessment | null>(null);
+  const [projectsSectionCollapsed, setProjectsSectionCollapsed] = useState(false);
+  const [showPlatformSettings, setShowPlatformSettings] = useState(false);
+  const [showUserManagement, setShowUserManagement] = useState(false);
 
   const queryClient = useQueryClient();
 
@@ -391,15 +396,27 @@ export default function ProjectManager({ onSelectAssessment }: ProjectManagerPro
           <div className="flex items-center justify-between mb-4">
             {!sidebarCollapsed && (
               <>
-                <h2 className="text-lg font-semibold text-gray-900">Projects</h2>
+                <button
+                  onClick={() => setProjectsSectionCollapsed(!projectsSectionCollapsed)}
+                  className="flex items-center gap-2 flex-1 text-left hover:bg-gray-50 rounded-lg p-2 -ml-2 -mr-2"
+                >
+                  {projectsSectionCollapsed ? (
+                    <ChevronRight className="w-4 h-4 text-gray-400" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4 text-gray-400" />
+                  )}
+                  <h2 className="text-lg font-semibold text-gray-900">Projects</h2>
+                </button>
                 <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setShowCreateCampaign(true)}
-                    className="p-1.5 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded"
-                    title="Create Campaign"
-                  >
-                    <FolderPlus className="w-5 h-5" />
-                  </button>
+                  {!projectsSectionCollapsed && (
+                    <button
+                      onClick={() => setShowCreateCampaign(true)}
+                      className="p-1.5 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded"
+                      title="Create Campaign"
+                    >
+                      <FolderPlus className="w-5 h-5" />
+                    </button>
+                  )}
                   <button
                     onClick={() => setSidebarCollapsed(true)}
                     className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
@@ -455,7 +472,7 @@ export default function ProjectManager({ onSelectAssessment }: ProjectManagerPro
           )}
         </div>
 
-        {!sidebarCollapsed && (
+        {!sidebarCollapsed && !projectsSectionCollapsed && (
           <div className="flex-1 overflow-y-auto p-2">
           {campaignsError ? (
             <div className="text-center text-gray-500 text-sm py-8 px-4">
@@ -683,6 +700,26 @@ export default function ProjectManager({ onSelectAssessment }: ProjectManagerPro
           )}
           </div>
         )}
+
+        {/* User Management & Platform Settings Section */}
+        {!sidebarCollapsed && (
+          <div className="border-t border-gray-200 p-4 flex-shrink-0 space-y-2">
+            <button
+              onClick={() => setShowUserManagement(true)}
+              className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 hover:border-gray-400 transition-colors"
+            >
+              <Shield className="w-5 h-5 text-gray-600" />
+              <span>User Management</span>
+            </button>
+            <button
+              onClick={() => setShowPlatformSettings(true)}
+              className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 hover:border-gray-400 transition-colors"
+            >
+              <Settings className="w-5 h-5 text-gray-600" />
+              <span>Platform Settings</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Main Content Area - Only show when no assessment is selected */}
@@ -702,6 +739,16 @@ export default function ProjectManager({ onSelectAssessment }: ProjectManagerPro
           assessment={settingsAssessment}
           onClose={() => setSettingsAssessment(null)}
         />
+      )}
+
+      {/* User Management Modal */}
+      {showUserManagement && (
+        <UserManagementModal onClose={() => setShowUserManagement(false)} />
+      )}
+
+      {/* Platform Settings Modal */}
+      {showPlatformSettings && (
+        <PlatformSettingsModal onClose={() => setShowPlatformSettings(false)} />
       )}
 
       {/* Delete Confirmation Modal */}

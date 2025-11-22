@@ -85,6 +85,8 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
     lookAway: [],
     multipleFaces: [],
   });
+  const [fullScreenViolations, setFullScreenViolations] = useState<Array<{ timestamp: string; reason: string }>>([]);
+  const [showFullScreenViolationModal, setShowFullScreenViolationModal] = useState(false);
   const [violationNotification, setViolationNotification] = useState<string | null>(null);
   const [showTimeUpModal, setShowTimeUpModal] = useState(false);
   const [timeUpIsLastBlock, setTimeUpIsLastBlock] = useState(false);
@@ -183,6 +185,7 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
       // Prepare integrity violations including proctoring
       const hasViolations = integrityViolations.copyAttempts > 0 || integrityViolations.pasteAttempts.length > 0;
       const hasProctoringViolations = proctoringViolations.lookAway.length > 0 || proctoringViolations.multipleFaces.length > 0;
+      const hasFullScreenViolations = fullScreenViolations.length > 0;
       
       const integrityViolationsData: any = {};
       if (hasViolations) {
@@ -191,6 +194,9 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
       }
       if (hasProctoringViolations) {
         integrityViolationsData.proctoring = proctoringViolations;
+      }
+      if (hasFullScreenViolations) {
+        integrityViolationsData.fullScreenExits = fullScreenViolations;
       }
 
       const res = await fetch(`/api/assessment/${publicUrl}/submit`, {
@@ -204,7 +210,7 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
           lastName: lastName || null,
           name: firstName && lastName ? `${firstName} ${lastName}` : firstName || lastName || null, // Legacy field
           responses: responseData,
-          integrityViolations: (hasViolations || hasProctoringViolations) ? integrityViolationsData : undefined,
+          integrityViolations: (hasViolations || hasProctoringViolations || hasFullScreenViolations) ? integrityViolationsData : undefined,
         }),
       });
 
@@ -409,6 +415,99 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
     if (!currentBlock.required) return true;
     return responses[currentBlock.id || ''] !== undefined && responses[currentBlock.id || ''] !== null && responses[currentBlock.id || ''] !== '';
   };
+
+  // Request full screen
+  const requestFullScreen = async () => {
+    try {
+      const element = document.documentElement;
+      if (element.requestFullscreen) {
+        await element.requestFullscreen();
+      } else if ((element as any).webkitRequestFullscreen) {
+        await (element as any).webkitRequestFullscreen();
+      } else if ((element as any).mozRequestFullScreen) {
+        await (element as any).mozRequestFullScreen();
+      } else if ((element as any).msRequestFullscreen) {
+        await (element as any).msRequestFullscreen();
+      }
+    } catch (error) {
+      console.error("[AssessmentTaker] Failed to request full screen:", error);
+    }
+  };
+
+  // Check if full screen is active
+  const isFullScreen = () => {
+    return !!(
+      document.fullscreenElement ||
+      (document as any).webkitFullscreenElement ||
+      (document as any).mozFullScreenElement ||
+      (document as any).msFullscreenElement
+    );
+  };
+
+  // Handle full screen violations
+  const handleFullScreenViolation = (reason: string) => {
+    const violation = {
+      timestamp: new Date().toISOString(),
+      reason,
+    };
+    setFullScreenViolations(prev => [...prev, violation]);
+    setShowFullScreenViolationModal(true);
+  };
+
+  // Monitor full screen and visibility changes
+  useEffect(() => {
+    if (!assessmentData?.settings?.requireFullScreen || showStartScreen || showConsentScreen || submitted) {
+      return;
+    }
+
+    // Full screen change handler
+    const handleFullScreenChange = () => {
+      if (!isFullScreen()) {
+        handleFullScreenViolation("exit");
+      }
+    };
+
+    // Visibility change handler (alt-tab detection)
+    const handleVisibilityChange = () => {
+      if (document.hidden && isFullScreen()) {
+        handleFullScreenViolation("visibility");
+      }
+    };
+
+    // Window blur handler (switching apps)
+    const handleBlur = () => {
+      if (isFullScreen()) {
+        handleFullScreenViolation("blur");
+      }
+    };
+
+    // Add event listeners
+    document.addEventListener("fullscreenchange", handleFullScreenChange);
+    document.addEventListener("webkitfullscreenchange", handleFullScreenChange);
+    document.addEventListener("mozfullscreenchange", handleFullScreenChange);
+    document.addEventListener("MSFullscreenChange", handleFullScreenChange);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("blur", handleBlur);
+
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullScreenChange);
+      document.removeEventListener("webkitfullscreenchange", handleFullScreenChange);
+      document.removeEventListener("mozfullscreenchange", handleFullScreenChange);
+      document.removeEventListener("MSFullscreenChange", handleFullScreenChange);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("blur", handleBlur);
+    };
+  }, [assessmentData?.settings?.requireFullScreen, showStartScreen, showConsentScreen, submitted]);
+
+  // Request full screen when consent is given and assessment starts
+  useEffect(() => {
+    if (consentGiven && !showStartScreen && !showConsentScreen && !submitted && assessmentData?.settings?.requireFullScreen === true) {
+      // Small delay to ensure UI is ready
+      setTimeout(() => {
+        requestFullScreen();
+      }, 500);
+    }
+  }, [consentGiven, showStartScreen, showConsentScreen, submitted, assessmentData?.settings?.requireFullScreen]);
 
   const renderBlockContent = (block: Block) => {
     return (
@@ -783,6 +882,10 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
                 <p>• Your video feed will be monitored during the assessment for proctoring purposes</p>
                 <p>• Your audio feed may also be monitored during the assessment</p>
                 <p>• Your video and/or audio may be stored for fraud prevention purposes</p>
+                {assessmentData?.settings?.requireFullScreen === true && (
+                  <p>• The assessment will run in full screen mode. Exiting full screen, switching tabs, or alt-tabbing will be flagged as a violation</p>
+                )}
+                <p>• During the assessment, you must keep your attention on the screen. Looking away, having pictures behind you, or having other people visible in the camera view will be considered a violation</p>
               </div>
             </div>
 
@@ -817,12 +920,19 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
               Back
             </button>
             <button
-              onClick={() => {
+              onClick={async () => {
                 if (!consentGiven) {
                   alert("Please acknowledge and authorize the recording by checking the consent box");
                   return;
                 }
                 setShowConsentScreen(false);
+                // Request full screen if enabled
+                if (assessmentData?.settings?.requireFullScreen === true) {
+                  // Small delay to ensure UI is ready
+                  setTimeout(() => {
+                    requestFullScreen();
+                  }, 500);
+                }
               }}
               disabled={!consentGiven}
               className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:bg-gray-300 disabled:cursor-not-allowed"
@@ -887,6 +997,32 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
                   </button>
                 </>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Full Screen Violation Modal */}
+      {showFullScreenViolationModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[10000]">
+          <div className="bg-white rounded-lg shadow-xl p-8 max-w-md mx-4">
+            <div className="text-center">
+              <div className="text-6xl mb-4">⚠️</div>
+              <h2 className="text-2xl font-bold text-gray-900 mb-4">Full Screen Violation</h2>
+              <p className="text-gray-600 mb-6">
+                Exiting full screen mode while taking this assessment is not allowed. This violation has been logged.
+                Please return to full screen mode to continue.
+              </p>
+              <button
+                onClick={async () => {
+                  setShowFullScreenViolationModal(false);
+                  // Try to re-enter full screen
+                  await requestFullScreen();
+                }}
+                className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+              >
+                Return to Full Screen
+              </button>
             </div>
           </div>
         </div>

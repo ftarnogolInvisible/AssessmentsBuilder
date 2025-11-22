@@ -9,6 +9,10 @@ import {
   webhookEvents,
   clients,
   users,
+  platformSettings,
+  clientUsers,
+  userAccessPermissions,
+  userInvites,
   type Campaign,
   type InsertCampaign,
   type Project,
@@ -27,6 +31,16 @@ import {
   type InsertWebhookEvent,
   type Client,
   type InsertClient,
+  type PlatformSettings,
+  type InsertPlatformSettings,
+  type User,
+  type InsertUser,
+  type ClientUser,
+  type InsertClientUser,
+  type UserAccessPermission,
+  type InsertUserAccessPermission,
+  type UserInvite,
+  type InsertUserInvite,
 } from "../shared/schema";
 import { db } from "./db";
 import { eq, and, desc, asc, count, or, lt } from "drizzle-orm";
@@ -696,6 +710,192 @@ export class Storage {
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(webhookEvents.createdAt))
       .limit(limit);
+  }
+
+  // Platform Settings methods
+  async getPlatformSettings(clientId: string): Promise<PlatformSettings | null> {
+    const [settings] = await db
+      .select()
+      .from(platformSettings)
+      .where(eq(platformSettings.clientId, clientId))
+      .limit(1);
+    return settings || null;
+  }
+
+  async upsertPlatformSettings(
+    clientId: string,
+    settings: Partial<Omit<InsertPlatformSettings, "clientId">>
+  ): Promise<PlatformSettings> {
+    const [result] = await db
+      .insert(platformSettings)
+      .values({
+        clientId,
+        ...settings,
+        updatedAt: new Date(),
+      } as InsertPlatformSettings)
+      .onConflictDoUpdate({
+        target: platformSettings.clientId,
+        set: {
+          ...settings,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+    return result;
+  }
+
+  // User Management methods
+  async getUsersForClient(clientId: string): Promise<(User & { clientRole: string })[]> {
+    const result = await db
+      .select({
+        id: users.id,
+        username: users.username,
+        email: users.email,
+        password: users.password,
+        role: users.role,
+        googleId: users.googleId,
+        googleEmail: users.googleEmail,
+        firstName: users.firstName,
+        lastName: users.lastName,
+        avatarUrl: users.avatarUrl,
+        twoFactorEnabled: users.twoFactorEnabled,
+        twoFactorSecret: users.twoFactorSecret,
+        active: users.active,
+        createdAt: users.createdAt,
+        updatedAt: users.updatedAt,
+        clientRole: clientUsers.role,
+      })
+      .from(users)
+      .innerJoin(clientUsers, eq(users.id, clientUsers.userId))
+      .where(eq(clientUsers.clientId, clientId));
+    return result;
+  }
+
+  async getUser(userId: string): Promise<User | undefined> {
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    return user || undefined;
+  }
+
+  async createUser(userData: InsertUser): Promise<User> {
+    const [user] = await db.insert(users).values([userData]).returning();
+    return user;
+  }
+
+  async updateUser(userId: string, userData: Partial<InsertUser>): Promise<User> {
+    const [user] = await db
+      .update(users)
+      .set({ ...userData, updatedAt: new Date() })
+      .where(eq(users.id, userId))
+      .returning();
+    return user;
+  }
+
+  async deleteUser(userId: string): Promise<void> {
+    await db.delete(users).where(eq(users.id, userId));
+  }
+
+  async addUserToClient(clientId: string, userId: string, role: string): Promise<ClientUser> {
+    const [clientUser] = await db
+      .insert(clientUsers)
+      .values({
+        clientId,
+        userId,
+        role,
+      } as InsertClientUser)
+      .returning();
+    return clientUser;
+  }
+
+  async updateClientUserRole(clientId: string, userId: string, role: string): Promise<ClientUser> {
+    const [clientUser] = await db
+      .update(clientUsers)
+      .set({ role })
+      .where(and(eq(clientUsers.clientId, clientId), eq(clientUsers.userId, userId)))
+      .returning();
+    return clientUser;
+  }
+
+  async removeUserFromClient(clientId: string, userId: string): Promise<void> {
+    await db
+      .delete(clientUsers)
+      .where(and(eq(clientUsers.clientId, clientId), eq(clientUsers.userId, userId)));
+  }
+
+  // User Access Permissions
+  async getUserAccessPermissions(userId: string, clientId: string): Promise<UserAccessPermission[]> {
+    return await db
+      .select()
+      .from(userAccessPermissions)
+      .where(and(eq(userAccessPermissions.userId, userId), eq(userAccessPermissions.clientId, clientId)));
+  }
+
+  async createUserAccessPermission(permission: InsertUserAccessPermission): Promise<UserAccessPermission> {
+    const [result] = await db.insert(userAccessPermissions).values([permission]).returning();
+    return result;
+  }
+
+  async deleteUserAccessPermission(permissionId: string): Promise<void> {
+    await db.delete(userAccessPermissions).where(eq(userAccessPermissions.id, permissionId));
+  }
+
+  async deleteUserAccessPermissionsByResource(
+    userId: string,
+    resourceType: string,
+    resourceId: string
+  ): Promise<void> {
+    await db
+      .delete(userAccessPermissions)
+      .where(
+        and(
+          eq(userAccessPermissions.userId, userId),
+          eq(userAccessPermissions.resourceType, resourceType),
+          eq(userAccessPermissions.resourceId, resourceId)
+        )
+      );
+  }
+
+  // User Invites
+  async createUserInvite(invite: InsertUserInvite): Promise<UserInvite> {
+    const [result] = await db.insert(userInvites).values([invite]).returning();
+    return result;
+  }
+
+  async getUserInvites(clientId: string): Promise<UserInvite[]> {
+    return await db
+      .select()
+      .from(userInvites)
+      .where(eq(userInvites.clientId, clientId))
+      .orderBy(desc(userInvites.createdAt));
+  }
+
+  async getUserInviteByToken(token: string): Promise<UserInvite | undefined> {
+    const [invite] = await db
+      .select()
+      .from(userInvites)
+      .where(eq(userInvites.token, token))
+      .limit(1);
+    return invite || undefined;
+  }
+
+  async acceptUserInvite(token: string, userId: string): Promise<void> {
+    await db
+      .update(userInvites)
+      .set({ acceptedAt: new Date() })
+      .where(eq(userInvites.token, token));
+    
+    // Get the invite to add user to client
+    const invite = await this.getUserInviteByToken(token);
+    if (invite) {
+      await this.addUserToClient(invite.clientId, userId, invite.role);
+    }
+  }
+
+  async deleteUserInvite(inviteId: string): Promise<void> {
+    await db.delete(userInvites).where(eq(userInvites.id, inviteId));
   }
 }
 

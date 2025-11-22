@@ -12,6 +12,9 @@ export default function AssessmentSettingsModal({ assessment, onClose }: Assessm
   const [enableProctoring, setEnableProctoring] = useState(
     assessment.settings?.enableProctoring ?? true // Default to true for existing assessments
   );
+  const [requireFullScreen, setRequireFullScreen] = useState(
+    assessment.settings?.requireFullScreen ?? false // Default to false
+  );
   const [showSuccess, setShowSuccess] = useState(false);
 
   const queryClient = useQueryClient();
@@ -55,6 +58,7 @@ export default function AssessmentSettingsModal({ assessment, onClose }: Assessm
     updateSettings.mutate({
       ...assessment.settings,
       enableProctoring,
+      requireFullScreen,
     });
   };
 
@@ -82,26 +86,44 @@ export default function AssessmentSettingsModal({ assessment, onClose }: Assessm
           </div>
         ) : (
           <div className="space-y-4">
-            <div>
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={enableProctoring}
-                  onChange={(e) => setEnableProctoring(e.target.checked)}
-                  className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                />
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-gray-900">
-                    Enable Video Proctoring
-                  </p>
-                  <p className="text-xs text-gray-600 mt-1">
-                    When enabled, the assessment will use video proctoring with eye and face tracking to detect violations.
-                  </p>
-                </div>
-              </label>
-            </div>
-          </div>
-        )}
+                    <div>
+                      <label className="flex items-center gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={enableProctoring}
+                          onChange={(e) => setEnableProctoring(e.target.checked)}
+                          className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                        />
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-gray-900">
+                            Enable Video Proctoring
+                          </p>
+                          <p className="text-xs text-gray-600 mt-1">
+                            When enabled, the assessment will use video proctoring with eye and face tracking to detect violations.
+                          </p>
+                        </div>
+                      </label>
+                    </div>
+                    <div>
+                      <label className="flex items-center gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={requireFullScreen}
+                          onChange={(e) => setRequireFullScreen(e.target.checked)}
+                          className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                        />
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-gray-900">
+                            Require Full Screen Mode
+                          </p>
+                          <p className="text-xs text-gray-600 mt-1">
+                            When enabled, the assessment will automatically enter full screen mode. Exiting full screen, switching tabs, or alt-tabbing will be flagged as a violation.
+                          </p>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+                )}
 
         <div className="flex gap-3 justify-end mt-6">
           <button

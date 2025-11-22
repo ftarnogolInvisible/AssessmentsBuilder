@@ -5,6 +5,9 @@ import { authenticateToken } from "./middleware/auth";
 import { authenticateApiKey, requirePermission } from "./middleware/apiKeyAuth";
 import { configureCORS, configureHelmet, publicRateLimit, adminRateLimit } from "./middleware/security";
 import { webhookService } from "./services/webhookService";
+import { encryptApiKey, isEncrypted } from "./utils/encryption";
+import { randomBytes } from "crypto";
+import bcrypt from "bcryptjs";
 
 export async function registerRoutes(app: Express): Promise<void> {
   console.log('[BOOT] Routes file loaded');
@@ -889,6 +892,371 @@ export async function registerRoutes(app: Express): Promise<void> {
       console.error("[Routes] Error updating block response:", error);
       res.status(500).json({ 
         error: "Failed to update block response",
+        details: process.env.NODE_ENV === "development" ? error?.message : undefined
+      });
+    }
+  });
+
+  // Platform Settings routes
+  adminRouter.get("/platform-settings", async (req: any, res) => {
+    try {
+      const clientId = req.user.clientId;
+      const settings = await storage.getPlatformSettings(clientId);
+      
+      if (!settings) {
+        // Create default settings if they don't exist
+        const defaultSettings = await storage.upsertPlatformSettings(clientId, {});
+        // Return safe version (without API keys)
+        const { llmConfig, ...rest } = defaultSettings;
+        return res.json({
+          ...rest,
+          llmConfig: {
+            openai: { enabled: false, model: "gpt-4" },
+            googleGemini: { enabled: false, model: "gemini-pro" },
+            openRouter: { enabled: false, defaultModel: "openai/gpt-4" },
+          },
+        });
+      }
+      
+      // Don't return API keys in response (security)
+      const { llmConfig, ...rest } = settings;
+      const safeLlmConfig = llmConfig ? {
+        openai: {
+          enabled: llmConfig.openai?.enabled || false,
+          model: llmConfig.openai?.model || "gpt-4",
+        },
+        googleGemini: {
+          enabled: llmConfig.googleGemini?.enabled || false,
+          model: llmConfig.googleGemini?.model || "gemini-pro",
+        },
+        openRouter: {
+          enabled: llmConfig.openRouter?.enabled || false,
+          defaultModel: llmConfig.openRouter?.defaultModel || "openai/gpt-4",
+        },
+      } : {
+        openai: { enabled: false, model: "gpt-4" },
+        googleGemini: { enabled: false, model: "gemini-pro" },
+        openRouter: { enabled: false, defaultModel: "openai/gpt-4" },
+      };
+      
+      res.json({ ...rest, llmConfig: safeLlmConfig });
+    } catch (error: any) {
+      console.error("[Routes] Error fetching platform settings:", error);
+      res.status(500).json({ 
+        error: "Failed to fetch platform settings",
+        details: process.env.NODE_ENV === "development" ? error?.message : undefined
+      });
+    }
+  });
+
+  adminRouter.put("/platform-settings", async (req: any, res) => {
+    try {
+      const clientId = req.user.clientId;
+      const { llmConfig, ...otherSettings } = req.body;
+      
+      // Get current settings to preserve existing encrypted keys
+      const currentSettings = await storage.getPlatformSettings(clientId);
+      const currentLlmConfig = currentSettings?.llmConfig || {};
+      
+      // Encrypt API keys before storing (only if new keys are provided)
+      const encryptedLlmConfig = llmConfig ? {
+        openai: llmConfig.openai ? {
+          enabled: llmConfig.openai.enabled ?? currentLlmConfig.openai?.enabled ?? false,
+          model: llmConfig.openai.model || currentLlmConfig.openai?.model || "gpt-4",
+          // Only encrypt if a new key is provided and it's not already encrypted
+          apiKey: llmConfig.openai.apiKey 
+            ? (isEncrypted(llmConfig.openai.apiKey) 
+                ? llmConfig.openai.apiKey 
+                : encryptApiKey(llmConfig.openai.apiKey))
+            : currentLlmConfig.openai?.apiKey,
+        } : currentLlmConfig.openai,
+        googleGemini: llmConfig.googleGemini ? {
+          enabled: llmConfig.googleGemini.enabled ?? currentLlmConfig.googleGemini?.enabled ?? false,
+          model: llmConfig.googleGemini.model || currentLlmConfig.googleGemini?.model || "gemini-pro",
+          apiKey: llmConfig.googleGemini.apiKey 
+            ? (isEncrypted(llmConfig.googleGemini.apiKey) 
+                ? llmConfig.googleGemini.apiKey 
+                : encryptApiKey(llmConfig.googleGemini.apiKey))
+            : currentLlmConfig.googleGemini?.apiKey,
+        } : currentLlmConfig.googleGemini,
+        openRouter: llmConfig.openRouter ? {
+          enabled: llmConfig.openRouter.enabled ?? currentLlmConfig.openRouter?.enabled ?? false,
+          defaultModel: llmConfig.openRouter.defaultModel || currentLlmConfig.openRouter?.defaultModel || "openai/gpt-4",
+          apiKey: llmConfig.openRouter.apiKey 
+            ? (isEncrypted(llmConfig.openRouter.apiKey) 
+                ? llmConfig.openRouter.apiKey 
+                : encryptApiKey(llmConfig.openRouter.apiKey))
+            : currentLlmConfig.openRouter?.apiKey,
+        } : currentLlmConfig.openRouter,
+      } : currentLlmConfig;
+      
+      const settings = await storage.upsertPlatformSettings(clientId, {
+        ...otherSettings,
+        llmConfig: encryptedLlmConfig,
+      });
+      
+      // Return safe version (without API keys)
+      const { llmConfig: returnedLlmConfig, ...rest } = settings;
+      const safeLlmConfig = returnedLlmConfig ? {
+        openai: {
+          enabled: returnedLlmConfig.openai?.enabled || false,
+          model: returnedLlmConfig.openai?.model || "gpt-4",
+        },
+        googleGemini: {
+          enabled: returnedLlmConfig.googleGemini?.enabled || false,
+          model: returnedLlmConfig.googleGemini?.model || "gemini-pro",
+        },
+        openRouter: {
+          enabled: returnedLlmConfig.openRouter?.enabled || false,
+          defaultModel: returnedLlmConfig.openRouter?.defaultModel || "openai/gpt-4",
+        },
+      } : {
+        openai: { enabled: false, model: "gpt-4" },
+        googleGemini: { enabled: false, model: "gemini-pro" },
+        openRouter: { enabled: false, defaultModel: "openai/gpt-4" },
+      };
+      
+      res.json({ ...rest, llmConfig: safeLlmConfig });
+    } catch (error: any) {
+      console.error("[Routes] Error updating platform settings:", error);
+      res.status(500).json({ 
+        error: "Failed to update platform settings",
+        details: process.env.NODE_ENV === "development" ? error?.message : undefined
+      });
+    }
+  });
+
+  // User Management routes
+  adminRouter.get("/users", async (req: any, res) => {
+    try {
+      const clientId = req.user.clientId;
+      const users = await storage.getUsersForClient(clientId);
+      // Don't return passwords
+      const safeUsers = users.map(({ password, ...user }) => user);
+      res.json(safeUsers);
+    } catch (error: any) {
+      console.error("[Routes] Error fetching users:", error);
+      res.status(500).json({ 
+        error: "Failed to fetch users",
+        details: process.env.NODE_ENV === "development" ? error?.message : undefined
+      });
+    }
+  });
+
+  adminRouter.post("/users", async (req: any, res) => {
+    try {
+      const clientId = req.user.clientId;
+      const { email, username, role, firstName, lastName, password } = req.body;
+
+      if (!email || !username) {
+        return res.status(400).json({ error: "Email and username are required" });
+      }
+
+      // Hash password if provided
+      const hashedPassword = password ? await bcrypt.hash(password, 10) : null;
+
+      const user = await storage.createUser({
+        email,
+        username,
+        password: hashedPassword || undefined,
+        role: role || "viewer",
+        firstName,
+        lastName,
+        active: true,
+      });
+
+      // Add user to client
+      await storage.addUserToClient(clientId, user.id, role || "viewer");
+
+      // Don't return password
+      const { password: _, ...safeUser } = user;
+      res.json(safeUser);
+    } catch (error: any) {
+      console.error("[Routes] Error creating user:", error);
+      res.status(500).json({ 
+        error: "Failed to create user",
+        details: process.env.NODE_ENV === "development" ? error?.message : undefined
+      });
+    }
+  });
+
+  adminRouter.put("/users/:id", async (req: any, res) => {
+    try {
+      const clientId = req.user.clientId;
+      const userId = req.params.id;
+      const { role, firstName, lastName, active, password } = req.body;
+
+      const updateData: any = {};
+      if (firstName !== undefined) updateData.firstName = firstName;
+      if (lastName !== undefined) updateData.lastName = lastName;
+      if (active !== undefined) updateData.active = active;
+      if (password) {
+        updateData.password = await bcrypt.hash(password, 10);
+      }
+
+      const user = await storage.updateUser(userId, updateData);
+
+      // Update client role if provided
+      if (role) {
+        await storage.updateClientUserRole(clientId, userId, role);
+      }
+
+      const { password: _, ...safeUser } = user;
+      res.json(safeUser);
+    } catch (error: any) {
+      console.error("[Routes] Error updating user:", error);
+      res.status(500).json({ 
+        error: "Failed to update user",
+        details: process.env.NODE_ENV === "development" ? error?.message : undefined
+      });
+    }
+  });
+
+  adminRouter.delete("/users/:id", async (req: any, res) => {
+    try {
+      const clientId = req.user.clientId;
+      const userId = req.params.id;
+
+      // Remove from client first
+      await storage.removeUserFromClient(clientId, userId);
+      
+      // Then delete user (or just deactivate)
+      await storage.updateUser(userId, { active: false });
+
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("[Routes] Error deleting user:", error);
+      res.status(500).json({ 
+        error: "Failed to delete user",
+        details: process.env.NODE_ENV === "development" ? error?.message : undefined
+      });
+    }
+  });
+
+  // User Invites
+  adminRouter.get("/user-invites", async (req: any, res) => {
+    try {
+      const clientId = req.user.clientId;
+      const invites = await storage.getUserInvites(clientId);
+      res.json(invites);
+    } catch (error: any) {
+      console.error("[Routes] Error fetching invites:", error);
+      res.status(500).json({ 
+        error: "Failed to fetch invites",
+        details: process.env.NODE_ENV === "development" ? error?.message : undefined
+      });
+    }
+  });
+
+  adminRouter.post("/user-invites", async (req: any, res) => {
+    try {
+      const clientId = req.user.clientId;
+      const userId = req.user.userId;
+      const { email, role } = req.body;
+
+      if (!email) {
+        return res.status(400).json({ error: "Email is required" });
+      }
+
+      // Generate unique token
+      const token = randomBytes(32).toString("hex");
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + 7); // 7 days expiration
+
+      const invite = await storage.createUserInvite({
+        email,
+        clientId,
+        role: role || "viewer",
+        invitedBy: userId,
+        token,
+        expiresAt,
+      });
+
+      // TODO: Send email invite (implement email service)
+      console.log(`[User Invite] Invite created for ${email}. Token: ${token}`);
+      console.log(`[User Invite] Invite URL: ${process.env.FRONTEND_URL || "http://localhost:5173"}/accept-invite/${token}`);
+
+      res.json(invite);
+    } catch (error: any) {
+      console.error("[Routes] Error creating invite:", error);
+      res.status(500).json({ 
+        error: "Failed to create invite",
+        details: process.env.NODE_ENV === "development" ? error?.message : undefined
+      });
+    }
+  });
+
+  adminRouter.delete("/user-invites/:id", async (req: any, res) => {
+    try {
+      const inviteId = req.params.id;
+      await storage.deleteUserInvite(inviteId);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("[Routes] Error deleting invite:", error);
+      res.status(500).json({ 
+        error: "Failed to delete invite",
+        details: process.env.NODE_ENV === "development" ? error?.message : undefined
+      });
+    }
+  });
+
+  // User Access Permissions
+  adminRouter.get("/users/:id/permissions", async (req: any, res) => {
+    try {
+      const clientId = req.user.clientId;
+      const userId = req.params.id;
+      const permissions = await storage.getUserAccessPermissions(userId, clientId);
+      res.json(permissions);
+    } catch (error: any) {
+      console.error("[Routes] Error fetching permissions:", error);
+      res.status(500).json({ 
+        error: "Failed to fetch permissions",
+        details: process.env.NODE_ENV === "development" ? error?.message : undefined
+      });
+    }
+  });
+
+  adminRouter.post("/users/:id/permissions", async (req: any, res) => {
+    try {
+      const clientId = req.user.clientId;
+      const userId = req.params.id;
+      const { resourceType, resourceId, permission } = req.body;
+
+      if (!resourceType || !resourceId || !permission) {
+        return res.status(400).json({ error: "resourceType, resourceId, and permission are required" });
+      }
+
+      // Delete existing permission for this resource
+      await storage.deleteUserAccessPermissionsByResource(userId, resourceType, resourceId);
+
+      // Create new permission
+      const newPermission = await storage.createUserAccessPermission({
+        userId,
+        clientId,
+        resourceType,
+        resourceId,
+        permission,
+      });
+
+      res.json(newPermission);
+    } catch (error: any) {
+      console.error("[Routes] Error creating permission:", error);
+      res.status(500).json({ 
+        error: "Failed to create permission",
+        details: process.env.NODE_ENV === "development" ? error?.message : undefined
+      });
+    }
+  });
+
+  adminRouter.delete("/users/:id/permissions/:permissionId", async (req: any, res) => {
+    try {
+      const permissionId = req.params.permissionId;
+      await storage.deleteUserAccessPermission(permissionId);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("[Routes] Error deleting permission:", error);
+      res.status(500).json({ 
+        error: "Failed to delete permission",
         details: process.env.NODE_ENV === "development" ? error?.message : undefined
       });
     }
