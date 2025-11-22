@@ -10,30 +10,50 @@ A comprehensive web platform for building and delivering modular assessments. Ad
   - Multiple choice (single correct answer)
   - Multi-select (multiple correct answers)
   - Free text responses
+  - Coding block (ACE editor with syntax highlighting)
+  - LaTeX block (mathematical notation with KaTeX)
   - Audio response recording
   - Video response recording (720p)
   - Media stimulus (image/video/audio)
-- **Block Configuration**: Title, instructions, required toggle, time limits, scoring
+- **Block Configuration**: Title, instructions, required toggle, time limits, scoring, copy/paste prevention
 - **Preview Mode**: Full-screen preview with progress tracking
 - **Versioning**: Draft and published states for assessments
+- **Assessment Settings**: Per-assessment configuration for proctoring and full-screen mode
 
 ### Assessment Delivery
 - **Public URLs**: Unique links for each published assessment
 - **Media Recording**: Built-in audio and video recording with WebRTC
 - **Progress Tracking**: Visual progress indicators
 - **Autosave**: Automatic saving of responses
+- **Time Limits**: Per-block time limits with automatic progression
+- **Anti-Cheating Features**:
+  - Copy/paste prevention (configurable per block)
+  - Video proctoring with eye and face tracking (MediaPipe)
+  - Full-screen mode enforcement
+  - Tab/window switching detection
+  - Integrity violation logging
 
 ### Admin Dashboard
 - **Project Management**: Hierarchical organization (Campaigns → Projects → Assessments)
-- **Submission Review**: Review and grade user submissions
+- **Submission Review**: Review and grade user submissions with integrity violation tracking
 - **Media Playback**: Playback audio and video responses
 - **Export**: Export submission data (CSV/JSON)
+- **User Management**: 
+  - User creation and management
+  - Role-based access control (Owner, Admin, Editor, Viewer)
+  - Email invite system
+  - Granular permissions (assessment/project/campaign level)
+- **Platform Settings**: 
+  - LLM API key management (OpenAI, Google Gemini, OpenRouter)
+  - Secure encryption for API keys
+  - Future-ready for AI features
 
 ### API & Integration
 - **RESTful API**: Complete API for all platform features
 - **n8n Compatibility**: Endpoints designed for workflow automation
-- **Webhooks**: Event-driven webhook system
-- **API Keys**: Secure API key management
+- **Webhooks**: Event-driven webhook system with retry logic
+- **API Keys**: Secure API key management with permissions
+- **Authentication**: JWT-based authentication with role-based access control
 
 ## 🛠 Tech Stack
 
@@ -47,6 +67,10 @@ A comprehensive web platform for building and delivering modular assessments. Ad
 - **State Management**: TanStack Query
 - **Routing**: Wouter
 - **Forms**: React Hook Form + Zod validation
+- **Code Editor**: ACE Editor (for coding blocks)
+- **Math Rendering**: KaTeX (for LaTeX blocks)
+- **Proctoring**: MediaPipe Face Mesh + Three.js
+- **Encryption**: Node.js crypto (AES-256-GCM)
 
 ## 🚀 Getting Started
 
@@ -119,9 +143,21 @@ AssessmentBuilder/
 │   ├── src/
 │   │   ├── components/
 │   │   │   ├── admin/         # Admin dashboard components
+│   │   │   │   ├── ProjectManager.tsx
+│   │   │   │   ├── AssessmentSettingsModal.tsx
+│   │   │   │   ├── PlatformSettingsModal.tsx
+│   │   │   │   └── UserManagementModal.tsx
 │   │   │   ├── assessment/    # Assessment taking components
+│   │   │   │   ├── AssessmentTaker.tsx
+│   │   │   │   └── ProctoringCamera.tsx
 │   │   │   ├── builder/       # Assessment builder components
+│   │   │   │   ├── AssessmentBuilder.tsx
+│   │   │   │   ├── CodingBlock.tsx
+│   │   │   │   ├── LaTeXBlock.tsx
+│   │   │   │   └── ...
 │   │   │   ├── review/        # Review dashboard components
+│   │   │   │   ├── ReviewerView.tsx
+│   │   │   │   └── SubmissionsTable.tsx
 │   │   │   └── ui/            # Reusable UI components
 │   │   ├── pages/             # Page components
 │   │   ├── lib/               # Utilities and config
@@ -129,6 +165,13 @@ AssessmentBuilder/
 │   └── index.html
 ├── server/                     # Backend Express API
 │   ├── middleware/            # Auth, security middleware
+│   │   ├── auth.ts            # JWT authentication
+│   │   ├── apiKeyAuth.ts      # API key authentication
+│   │   └── security.ts        # CORS, Helmet, rate limiting
+│   ├── services/              # Business logic services
+│   │   └── webhookService.ts  # Webhook triggering and retry
+│   ├── utils/                 # Utility functions
+│   │   └── encryption.ts      # API key encryption
 │   ├── db.ts                  # Database connection
 │   ├── storage.ts             # Data access layer
 │   ├── routes.ts              # API routes
@@ -178,13 +221,28 @@ AssessmentBuilder/
 - ✅ Scoring interface
 - ✅ Internal notes
 - ✅ Export functionality (CSV/JSON)
+- ✅ Integrity violations review section
+- ✅ Screenshot gallery for proctoring violations
 
-### ⏳ Phase 5: API Integration & Webhooks - IN PROGRESS
-- ⏳ Complete API routes for all entities
-- ⏳ Webhook trigger implementation
-- ⏳ n8n-compatible endpoints
-- ⏳ API key authentication middleware
-- ⏳ Webhook retry logic
+### ✅ Phase 5: API Integration & Webhooks - COMPLETED
+- ✅ Complete API routes for all entities
+- ✅ Webhook trigger implementation
+- ✅ n8n-compatible endpoints (`/api/v1/*`)
+- ✅ API key authentication middleware
+- ✅ Webhook retry logic with exponential backoff
+- ✅ Permission-based API access control
+
+### ✅ Phase 6: Advanced Features - COMPLETED
+- ✅ Anti-cheating system (copy/paste prevention)
+- ✅ Video proctoring with eye and face tracking
+- ✅ Full-screen mode enforcement
+- ✅ Integrity violation tracking and logging
+- ✅ Coding block with ACE editor
+- ✅ LaTeX block with KaTeX rendering
+- ✅ Time limit enforcement
+- ✅ Platform settings with LLM API key storage
+- ✅ User management system with roles and invites
+- ✅ Granular permissions system
 
 ## 🔧 Available Scripts
 
@@ -202,25 +260,32 @@ Key environment variables (see `env.example` for full list):
 - `DATABASE_URL` - PostgreSQL connection string
 - `PORT` - Server port (default: 5000)
 - `JWT_SECRET` - Secret for JWT tokens
+- `ENCRYPTION_KEY` - Encryption key for API keys (32+ characters, use Secret Manager in production)
 - `S3_BUCKET` - S3 bucket name (optional)
 - `AWS_ACCESS_KEY_ID` - AWS access key (optional)
 - `AWS_SECRET_ACCESS_KEY` - AWS secret key (optional)
 - `CORS_ORIGIN` - CORS allowed origins
+- `FRONTEND_URL` - Frontend URL for invite links (optional)
 
 ## 📝 Database Schema
 
 The platform uses a multi-tenant architecture with the following main entities:
 
-- **users** - Admin user accounts with roles (owner, editor, reviewer)
+- **users** - Admin user accounts with roles (owner, admin, editor, viewer)
 - **clients** - Multi-tenant client management
+- **client_users** - Many-to-many relationship between clients and users
+- **user_invites** - Email-based user invitations
+- **user_access_permissions** - Granular permissions for assessments/projects/campaigns
 - **campaigns** - Top-level folders for organizing assessments
 - **projects** - Assessments grouped under campaigns
-- **assessments** - Individual assessment instances with versioning
+- **assessments** - Individual assessment instances with versioning and settings
 - **blocks** - Question/element blocks within assessments
-- **assessment_submissions** - User submissions for assessments
+  - Types: multiple_choice, multi_select, free_text, coding_block, latex_block, audio_response, video_response, media_stimulus
+- **assessment_submissions** - User submissions with integrity violations tracking
 - **block_responses** - Individual responses to blocks
-- **api_keys** - API keys for external integrations
-- **webhook_events** - Log of webhook triggers
+- **api_keys** - API keys for external integrations with permissions
+- **webhook_events** - Log of webhook triggers with retry tracking
+- **platform_settings** - Platform-wide settings including LLM API keys
 
 ## 🤝 Contributing
 
@@ -254,5 +319,48 @@ This project is licensed under the MIT License.
 ```bash
 npm run db:reset
 npm run db:push
+```
+
+## 🔒 Security Features
+
+### API Key Encryption
+- LLM API keys are encrypted at rest using AES-256-GCM
+- Encryption key should be stored in Google Cloud Secret Manager (production)
+- Keys are never returned in API responses
+
+### User Authentication
+- JWT-based authentication
+- Role-based access control (Owner, Admin, Editor, Viewer)
+- Multi-tenant isolation via client IDs
+
+### Proctoring & Anti-Cheating
+- Video proctoring with MediaPipe Face Mesh
+- Eye and face tracking
+- Full-screen mode enforcement
+- Tab/window switching detection
+- Copy/paste prevention (configurable per block)
+- All violations logged with timestamps and screenshots
+
+## 🚀 Deployment
+
+### Google Cloud Platform (Recommended)
+The platform is designed for deployment on Google Cloud:
+
+- **Cloud Run**: Containerized deployment
+- **Cloud SQL**: Managed PostgreSQL
+- **Secret Manager**: Secure storage for encryption keys
+- **Cloud Storage**: Media file storage (optional)
+
+### Environment Setup
+1. Set `ENCRYPTION_KEY` in Secret Manager
+2. Configure `DATABASE_URL` for Cloud SQL
+3. Set up Cloud Storage buckets (if using S3-compatible storage)
+4. Configure CORS origins for production domain
+
+### Docker Support
+The platform can be containerized for deployment:
+```bash
+npm run build
+# Use the built files in dist/ for containerization
 ```
 
