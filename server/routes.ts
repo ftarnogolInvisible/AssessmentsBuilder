@@ -158,7 +158,7 @@ export async function registerRoutes(app: Express): Promise<void> {
         return res.status(403).json({ error: "Assessment is not published" });
       }
 
-      const { email, firstName, lastName, name, responses, integrityViolations } = req.body;
+      const { email, firstName, lastName, name, responses, integrityViolations, systemInfo } = req.body;
       
       console.log("[Routes] Creating submission with:", {
         assessmentId: assessment.id,
@@ -183,6 +183,7 @@ export async function registerRoutes(app: Express): Promise<void> {
         progress: 100,
         submittedAt: new Date(),
         integrityViolations: integrityViolations || { copyAttempts: 0, pasteAttempts: [] },
+        systemInfo: systemInfo || undefined,
       });
 
       console.log("[Routes] Submission created:", submission.id);
@@ -833,6 +834,29 @@ export async function registerRoutes(app: Express): Promise<void> {
     }
   });
 
+  // Get system info for a submission (API endpoint for external platforms)
+  adminRouter.get("/submissions/:id/system-info", async (req: any, res) => {
+    try {
+      const submissionId = req.params.id;
+      const clientId = req.user.clientId;
+      const submission = await storage.getSubmission(submissionId, clientId);
+      if (!submission) {
+        return res.status(404).json({ error: "Submission not found" });
+      }
+
+      return res.json({
+        submissionId: submission.id,
+        systemInfo: submission.systemInfo || null,
+      });
+    } catch (error: any) {
+      console.error("[Routes] Error fetching system info:", error);
+      res.status(500).json({ 
+        error: "Failed to fetch system info",
+        details: process.env.NODE_ENV === "development" ? error?.message : undefined
+      });
+    }
+  });
+
   adminRouter.get("/submissions/:id", async (req: any, res) => {
     try {
       const submissionId = req.params.id;
@@ -892,6 +916,22 @@ export async function registerRoutes(app: Express): Promise<void> {
       console.error("[Routes] Error updating block response:", error);
       res.status(500).json({ 
         error: "Failed to update block response",
+        details: process.env.NODE_ENV === "development" ? error?.message : undefined
+      });
+    }
+  });
+
+  adminRouter.delete("/submissions/:id", async (req: any, res) => {
+    try {
+      const submissionId = req.params.id;
+      const clientId = req.user.clientId;
+      
+      await storage.deleteAssessmentSubmission(submissionId, clientId);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("[Routes] Error deleting submission:", error);
+      res.status(500).json({ 
+        error: "Failed to delete submission",
         details: process.env.NODE_ENV === "development" ? error?.message : undefined
       });
     }
@@ -1472,6 +1512,27 @@ export async function registerRoutes(app: Express): Promise<void> {
     } catch (error: any) {
       console.error("[API] Error fetching submissions:", error);
       res.status(500).json({ error: "Failed to fetch submissions" });
+    }
+  });
+
+  // Get system info for a submission (API endpoint for external platforms)
+  apiRouter.get("/submissions/:id/system-info", requirePermission("read:submissions"), async (req: any, res) => {
+    try {
+      const apiKey = req.apiKey;
+      const submission = await storage.getSubmission(req.params.id, apiKey.clientId);
+      if (!submission) {
+        return res.status(404).json({ error: "Submission not found" });
+      }
+
+      return res.json({
+        data: {
+          submissionId: submission.id,
+          systemInfo: submission.systemInfo || null,
+        },
+      });
+    } catch (error: any) {
+      console.error("[API] Error fetching system info:", error);
+      res.status(500).json({ error: "Failed to fetch system info" });
     }
   });
 

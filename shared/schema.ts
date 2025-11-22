@@ -120,6 +120,7 @@ export const assessments = pgTable("assessments", {
     autosaveInterval?: number; // milliseconds
     enableProctoring?: boolean; // Enable/disable video proctoring camera
     requireFullScreen?: boolean; // Require full screen mode during assessment
+    requireSingleScreen?: boolean; // Require only one monitor/screen
   }>().notNull().default({}),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -209,7 +210,19 @@ export const assessmentSubmissions = pgTable("assessment_submissions", {
       multipleFaces?: Array<{ timestamp: string; screenshot?: string }>; // Multiple faces detected with optional screenshot
     };
     fullScreenExits?: Array<{ timestamp: string; reason: string }>; // Full screen exit violations: "exit", "visibility", "blur"
+    multipleScreens?: Array<{ timestamp: string }>; // Multiple screen/monitor violations
   }>().notNull().default({}),
+  systemInfo: json("system_info").$type<{
+    browser?: string; // Browser type (Chrome, Firefox, Safari, etc.)
+    browserVersion?: string; // Browser version
+    os?: string; // Operating system (Windows, macOS, Linux, iOS, Android)
+    device?: string; // Device type (desktop, tablet, mobile)
+    model?: string; // Device model (MacBook Air, iPhone 13, etc.)
+    vendor?: string; // Vendor (Apple, Dell, Samsung, etc.)
+    memory?: number; // RAM in GB
+    screenResolution?: string; // Screen resolution (e.g., "1920x1080")
+    ipAddress?: string; // IP address
+  }>(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

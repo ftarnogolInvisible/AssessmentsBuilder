@@ -15,6 +15,9 @@ export default function AssessmentSettingsModal({ assessment, onClose }: Assessm
   const [requireFullScreen, setRequireFullScreen] = useState(
     assessment.settings?.requireFullScreen ?? false // Default to false
   );
+  const [requireSingleScreen, setRequireSingleScreen] = useState(
+    assessment.settings?.requireSingleScreen ?? false // Default to false
+  );
   const [showSuccess, setShowSuccess] = useState(false);
 
   const queryClient = useQueryClient();
@@ -59,6 +62,7 @@ export default function AssessmentSettingsModal({ assessment, onClose }: Assessm
       ...assessment.settings,
       enableProctoring,
       requireFullScreen,
+      requireSingleScreen,
     });
   };
 
@@ -118,6 +122,24 @@ export default function AssessmentSettingsModal({ assessment, onClose }: Assessm
                           </p>
                           <p className="text-xs text-gray-600 mt-1">
                             When enabled, the assessment will automatically enter full screen mode. Exiting full screen, switching tabs, or alt-tabbing will be flagged as a violation.
+                          </p>
+                        </div>
+                      </label>
+                    </div>
+                    <div>
+                      <label className="flex items-center gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={requireSingleScreen}
+                          onChange={(e) => setRequireSingleScreen(e.target.checked)}
+                          className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                        />
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-gray-900">
+                            Require Single Screen
+                          </p>
+                          <p className="text-xs text-gray-600 mt-1">
+                            When enabled, users must disconnect any secondary monitors before starting the assessment. Connecting a second screen during the assessment will be flagged as a violation.
                           </p>
                         </div>
                       </label>

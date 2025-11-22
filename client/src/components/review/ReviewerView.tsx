@@ -605,7 +605,8 @@ export default function ReviewerView({ submission, assessmentId, onClose }: Revi
               (violations.proctoring.multipleFaces && violations.proctoring.multipleFaces.length > 0)
             );
             const hasFullScreenViolations = violations && violations.fullScreenExits && violations.fullScreenExits.length > 0;
-            const hasViolations = hasCopyAttempts || hasPasteAttempts || hasProctoringViolations || hasFullScreenViolations;
+            const hasMultipleScreenViolations = violations && violations.multipleScreens && violations.multipleScreens.length > 0;
+            const hasViolations = hasCopyAttempts || hasPasteAttempts || hasProctoringViolations || hasFullScreenViolations || hasMultipleScreenViolations;
             const hasViolationsData = violations !== null && violations !== undefined;
             
             // Debug: Log violations data
@@ -781,6 +782,33 @@ export default function ReviewerView({ submission, assessmentId, onClose }: Revi
                       </div>
                     </div>
                   )}
+
+                  {/* Multiple Screen Violations */}
+                  {violations.multipleScreens && violations.multipleScreens.length > 0 && (
+                    <div className="mt-4 bg-orange-50 border border-orange-200 rounded-lg p-4">
+                      <div className="flex items-center gap-2 mb-3">
+                        <XCircle className="w-5 h-5 text-orange-600" />
+                        <span className="font-medium text-orange-900">Multiple Screen Violations</span>
+                      </div>
+                      <p className="text-sm font-medium text-orange-800 mb-2">
+                        Total Violations: {violations.multipleScreens.length}
+                      </p>
+                      <div className="space-y-2 max-h-64 overflow-y-auto">
+                        {violations.multipleScreens.map((violation: any, idx: number) => (
+                          <div key={idx} className="flex items-start gap-2 p-2 bg-white rounded border border-orange-200">
+                            <div className="text-xs text-orange-700 flex-shrink-0 pt-1">
+                              {new Date(violation.timestamp).toLocaleString()}
+                            </div>
+                            <div className="flex-1">
+                              <p className="text-xs text-orange-800">
+                                Multiple screens/monitors detected during assessment
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   
                   {/* No Violations Message */}
                   {!hasViolations && hasViolationsData && (
@@ -808,6 +836,73 @@ export default function ReviewerView({ submission, assessmentId, onClose }: Revi
               </div>
             );
           })()}
+
+          {/* System Information */}
+          {submissionData.systemInfo && (
+            <div className="mt-6">
+              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-5">
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
+                    <span className="text-blue-600 text-lg">💻</span>
+                  </div>
+                  <h3 className="text-lg font-semibold text-gray-900">System Information</h3>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {submissionData.systemInfo.browser && (
+                    <div className="bg-white rounded-lg p-3 border border-blue-100">
+                      <p className="text-xs text-gray-500 mb-1">Browser</p>
+                      <p className="text-sm font-medium text-gray-900">
+                        {submissionData.systemInfo.browser}
+                        {submissionData.systemInfo.browserVersion && ` ${submissionData.systemInfo.browserVersion}`}
+                      </p>
+                    </div>
+                  )}
+                  {submissionData.systemInfo.os && (
+                    <div className="bg-white rounded-lg p-3 border border-blue-100">
+                      <p className="text-xs text-gray-500 mb-1">Operating System</p>
+                      <p className="text-sm font-medium text-gray-900">{submissionData.systemInfo.os}</p>
+                    </div>
+                  )}
+                  {submissionData.systemInfo.device && (
+                    <div className="bg-white rounded-lg p-3 border border-blue-100">
+                      <p className="text-xs text-gray-500 mb-1">Device Type</p>
+                      <p className="text-sm font-medium text-gray-900 capitalize">{submissionData.systemInfo.device}</p>
+                    </div>
+                  )}
+                  {submissionData.systemInfo.vendor && (
+                    <div className="bg-white rounded-lg p-3 border border-blue-100">
+                      <p className="text-xs text-gray-500 mb-1">Vendor</p>
+                      <p className="text-sm font-medium text-gray-900">{submissionData.systemInfo.vendor}</p>
+                    </div>
+                  )}
+                  {submissionData.systemInfo.model && (
+                    <div className="bg-white rounded-lg p-3 border border-blue-100">
+                      <p className="text-xs text-gray-500 mb-1">Model</p>
+                      <p className="text-sm font-medium text-gray-900">{submissionData.systemInfo.model}</p>
+                    </div>
+                  )}
+                  {submissionData.systemInfo.memory && (
+                    <div className="bg-white rounded-lg p-3 border border-blue-100">
+                      <p className="text-xs text-gray-500 mb-1">Memory (RAM)</p>
+                      <p className="text-sm font-medium text-gray-900">{submissionData.systemInfo.memory} GB</p>
+                    </div>
+                  )}
+                  {submissionData.systemInfo.screenResolution && (
+                    <div className="bg-white rounded-lg p-3 border border-blue-100">
+                      <p className="text-xs text-gray-500 mb-1">Screen Resolution</p>
+                      <p className="text-sm font-medium text-gray-900">{submissionData.systemInfo.screenResolution}</p>
+                    </div>
+                  )}
+                  {submissionData.systemInfo.ipAddress && (
+                    <div className="bg-white rounded-lg p-3 border border-blue-100">
+                      <p className="text-xs text-gray-500 mb-1">IP Address</p>
+                      <p className="text-sm font-medium text-gray-900 font-mono">{submissionData.systemInfo.ipAddress}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Internal Notes */}
           <div className="mt-6">

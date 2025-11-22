@@ -388,6 +388,16 @@ export class Storage {
       .orderBy(desc(assessmentSubmissions.createdAt));
   }
 
+  async deleteAssessmentSubmission(id: string, clientId: string): Promise<void> {
+    // First verify the submission belongs to the client
+    const submission = await this.getSubmission(id, clientId);
+    if (!submission) {
+      throw new Error("Submission not found or access denied");
+    }
+    // Delete will cascade to block_responses due to foreign key constraint
+    await db.delete(assessmentSubmissions).where(eq(assessmentSubmissions.id, id));
+  }
+
   async getAllSubmissions(clientId: string): Promise<Array<AssessmentSubmission & {
     assessment: Assessment & { project: Project & { campaign: Campaign } };
   }>> {

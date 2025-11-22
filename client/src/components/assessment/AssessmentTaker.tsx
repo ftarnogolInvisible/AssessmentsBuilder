@@ -8,6 +8,7 @@ import CodingBlock from "../builder/CodingBlock";
 import LaTeXBlock from "../builder/LaTeXBlock";
 import katex from "katex";
 import "katex/dist/katex.min.css";
+import { collectSystemInfo } from "../../utils/systemInfo";
 import ProctoringCamera from "./ProctoringCamera";
 
 // Helper component for displaying LaTeX example preview
@@ -86,10 +87,69 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
     multipleFaces: [],
   });
   const [fullScreenViolations, setFullScreenViolations] = useState<Array<{ timestamp: string; reason: string }>>([]);
+  const [multipleScreenViolations, setMultipleScreenViolations] = useState<Array<{ timestamp: string }>>([]);
+  const [showMultipleScreenBlock, setShowMultipleScreenBlock] = useState(false);
+  const [screenCount, setScreenCount] = useState<number | null>(null);
+  const [isUnsupportedBrowser, setIsUnsupportedBrowser] = useState(false);
   const [showFullScreenViolationModal, setShowFullScreenViolationModal] = useState(false);
   const [violationNotification, setViolationNotification] = useState<string | null>(null);
   const [showTimeUpModal, setShowTimeUpModal] = useState(false);
   const [timeUpIsLastBlock, setTimeUpIsLastBlock] = useState(false);
+
+  // Detect browser compatibility
+  const detectBrowser = () => {
+    const userAgent = navigator.userAgent.toLowerCase();
+    const isChrome = /chrome/.test(userAgent) && !/edg/.test(userAgent) && !/opr/.test(userAgent);
+    const isEdge = /edg/.test(userAgent);
+    const isBrave = (navigator as any).brave && (navigator as any).brave.isBrave;
+    const isArc = userAgent.includes('arc');
+    
+    return isChrome || isEdge || isBrave || isArc;
+  };
+
+  // Detect screen count
+  const detectScreenCount = async (): Promise<number> => {
+    try {
+      // Try modern Screen Details API (Chrome/Edge)
+      if ('getScreenDetails' in navigator && (navigator as any).getScreenDetails) {
+        try {
+          const screenDetails = await (navigator as any).getScreenDetails();
+          return screenDetails.screens.length;
+        } catch (e) {
+          console.log("[AssessmentTaker] Screen Details API not available, using fallback");
+        }
+      }
+      
+      // Fallback: Check if screen dimensions suggest multiple monitors
+      const currentWidth = window.screen.width;
+      const currentHeight = window.screen.height;
+      const windowWidth = window.outerWidth;
+      const windowHeight = window.outerHeight;
+      
+      // If window extends significantly beyond primary screen, might indicate multiple monitors
+      // This is a heuristic and not perfect
+      if (windowWidth > currentWidth * 1.1 || windowHeight > currentHeight * 1.1) {
+        return 2; // Likely multiple screens
+      }
+      
+      // Check screen.isExtended if available (non-standard, some browsers)
+      if ((window.screen as any).isExtended !== undefined) {
+        return (window.screen as any).isExtended ? 2 : 1;
+      }
+      
+      // Default: assume single screen (conservative approach)
+      return 1;
+    } catch (error) {
+      console.error("[AssessmentTaker] Error detecting screen count:", error);
+      return 1; // Default to single screen on error
+    }
+  };
+
+  // Check browser compatibility on mount
+  useEffect(() => {
+    const isSupported = detectBrowser();
+    setIsUnsupportedBrowser(!isSupported);
+  }, []);
 
   // Fetch assessment by public URL
   const { data: assessmentData, isLoading, error } = useQuery<Assessment & { blocks: Block[] }>({
@@ -182,10 +242,15 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
       
       console.log(`[AssessmentTaker] Submitting ${responseData.length} responses`);
 
+      // Collect system information
+      const systemInfo = await collectSystemInfo();
+      console.log("[AssessmentTaker] System info collected:", systemInfo);
+
       // Prepare integrity violations including proctoring
       const hasViolations = integrityViolations.copyAttempts > 0 || integrityViolations.pasteAttempts.length > 0;
       const hasProctoringViolations = proctoringViolations.lookAway.length > 0 || proctoringViolations.multipleFaces.length > 0;
       const hasFullScreenViolations = fullScreenViolations.length > 0;
+      const hasMultipleScreenViolations = multipleScreenViolations.length > 0;
       
       const integrityViolationsData: any = {};
       if (hasViolations) {
@@ -197,6 +262,9 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
       }
       if (hasFullScreenViolations) {
         integrityViolationsData.fullScreenExits = fullScreenViolations;
+      }
+      if (hasMultipleScreenViolations) {
+        integrityViolationsData.multipleScreens = multipleScreenViolations;
       }
 
       const res = await fetch(`/api/assessment/${publicUrl}/submit`, {
@@ -210,7 +278,8 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
           lastName: lastName || null,
           name: firstName && lastName ? `${firstName} ${lastName}` : firstName || lastName || null, // Legacy field
           responses: responseData,
-          integrityViolations: (hasViolations || hasProctoringViolations || hasFullScreenViolations) ? integrityViolationsData : undefined,
+          integrityViolations: (hasViolations || hasProctoringViolations || hasFullScreenViolations || hasMultipleScreenViolations) ? integrityViolationsData : undefined,
+          systemInfo,
         }),
       });
 
@@ -835,7 +904,7 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
           </div>
 
           <button
-            onClick={() => {
+            onClick={async () => {
               if (!email) {
                 alert("Please enter your email address");
                 return;
@@ -848,6 +917,17 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
                 alert("Please enter your last name");
                 return;
               }
+              
+              // Check screen count before proceeding
+              if (assessmentData.settings?.requireSingleScreen === true) {
+                const count = await detectScreenCount();
+                if (count > 1) {
+                  setShowMultipleScreenBlock(true);
+                  setScreenCount(count);
+                  return;
+                }
+              }
+              
               // Only show consent screen if proctoring is enabled
               if (assessmentData.settings?.enableProctoring === true) {
                 setShowStartScreen(false);
@@ -856,6 +936,12 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
                 // Skip consent screen if proctoring is disabled
                 setShowStartScreen(false);
                 setConsentGiven(true); // Set to true so camera won't show
+                // Request full screen if enabled
+                if (assessmentData?.settings?.requireFullScreen === true) {
+                  setTimeout(() => {
+                    requestFullScreen();
+                  }, 500);
+                }
               }
             }}
             className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
@@ -879,11 +965,15 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
                 <strong>Important:</strong> This assessment uses proctoring technology to ensure assessment integrity.
               </p>
               <div className="space-y-2 text-sm text-blue-800">
+                <p>• You must use a Chrome-based browser (Chrome, Brave, Arc, Edge) to take this assessment</p>
                 <p>• Your video feed will be monitored during the assessment for proctoring purposes</p>
                 <p>• Your audio feed may also be monitored during the assessment</p>
                 <p>• Your video and/or audio may be stored for fraud prevention purposes</p>
                 {assessmentData?.settings?.requireFullScreen === true && (
                   <p>• The assessment will run in full screen mode. Exiting full screen, switching tabs, or alt-tabbing will be flagged as a violation</p>
+                )}
+                {assessmentData?.settings?.requireSingleScreen === true && (
+                  <p>• Only one monitor/screen is allowed. Please disconnect any secondary monitors before starting</p>
                 )}
                 <p>• During the assessment, you must keep your attention on the screen. Looking away, having pictures behind you, or having other people visible in the camera view will be considered a violation</p>
               </div>
@@ -925,6 +1015,18 @@ export default function AssessmentTaker({ publicUrl }: AssessmentTakerProps) {
                   alert("Please acknowledge and authorize the recording by checking the consent box");
                   return;
                 }
+                
+                // Check screen count before starting
+                if (assessmentData?.settings?.requireSingleScreen === true) {
+                  const count = await detectScreenCount();
+                  if (count > 1) {
+                    setShowMultipleScreenBlock(true);
+                    setScreenCount(count);
+                    setShowConsentScreen(false);
+                    return;
+                  }
+                }
+                
                 setShowConsentScreen(false);
                 // Request full screen if enabled
                 if (assessmentData?.settings?.requireFullScreen === true) {

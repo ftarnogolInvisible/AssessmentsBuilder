@@ -26,24 +26,6 @@ export default function Admin() {
     },
   });
 
-  // Clear all data function (for development)
-  const clearAllData = async () => {
-    if (confirm("Are you sure you want to delete ALL campaigns, projects, and assessments? This cannot be undone!")) {
-      try {
-        const res = await fetch("/api/dev/clear-all", { method: "POST" });
-        if (res.ok) {
-          alert("All data cleared successfully!");
-          window.location.reload();
-        } else {
-          const error = await res.json();
-          alert(`Failed to clear data: ${error.error || "Unknown error"}`);
-        }
-      } catch (error) {
-        alert(`Failed to clear data: ${error instanceof Error ? error.message : "Unknown error"}`);
-      }
-    }
-  };
-
   // Test API connection
   useQuery({
     queryKey: ["health"],
@@ -56,17 +38,6 @@ export default function Admin() {
 
   return (
     <div className="min-h-screen bg-gray-50 flex relative">
-      {process.env.NODE_ENV === "development" && (
-        <div className="fixed bottom-4 right-4 z-50">
-          <button
-            onClick={clearAllData}
-            className="px-4 py-2 bg-red-600 text-white rounded-lg shadow-lg hover:bg-red-700 text-sm font-medium"
-            title="Clear all data (dev only)"
-          >
-            🗑️ Clear All Data
-          </button>
-        </div>
-      )}
       <ProjectManager onSelectAssessment={setSelectedAssessment} />
       {selectedAssessment && (
         <div className="flex-1">

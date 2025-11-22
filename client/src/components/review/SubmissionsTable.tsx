@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AssessmentSubmission } from "@shared/schema";
-import { Eye, Filter, Download } from "lucide-react";
+import { Eye, Filter, Download, Trash2 } from "lucide-react";
 
 interface SubmissionWithDetails extends AssessmentSubmission {
   assessment?: {
@@ -29,7 +29,9 @@ export default function SubmissionsTable({ assessmentId, onSelectSubmission }: S
   const [projectFilter, setProjectFilter] = useState<string>("all");
   const [assessmentFilter, setAssessmentFilter] = useState<string>("all");
   const [page, setPage] = useState(1);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const pageSize = 10;
+  const queryClient = useQueryClient();
 
   const { data: submissions = [], isLoading, refetch } = useQuery<SubmissionWithDetails[]>({
     queryKey: assessmentId ? ["submissions", assessmentId] : ["submissions", "all"],
@@ -172,6 +174,48 @@ export default function SubmissionsTable({ assessmentId, onSelectSubmission }: S
   const formatDate = (date: string | Date | null) => {
     if (!date) return "N/A";
     return new Date(date).toLocaleString();
+  };
+
+  const deleteSubmission = useMutation({
+    mutationFn: async (submissionId: string) => {
+      const token = localStorage.getItem("token");
+      const headers: HeadersInit = {
+        "Content-Type": "application/json",
+      };
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+      const res = await fetch(`/api/admin/submissions/${submissionId}`, {
+        method: "DELETE",
+        headers,
+      });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({ error: "Failed to delete submission" }));
+        throw new Error(error.error || "Failed to delete submission");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      // Invalidate and refetch submissions
+      queryClient.invalidateQueries({ queryKey: assessmentId ? ["submissions", assessmentId] : ["submissions", "all"] });
+      setDeletingId(null);
+    },
+    onError: (error) => {
+      console.error("[SubmissionsTable] Error deleting submission:", error);
+      alert(error instanceof Error ? error.message : "Failed to delete submission");
+      setDeletingId(null);
+    },
+  });
+
+  const handleDelete = (submission: AssessmentSubmission) => {
+    const submissionName = submission.firstName && submission.lastName
+      ? `${submission.firstName} ${submission.lastName}`
+      : submission.name || submission.email || "this submission";
+    
+    if (window.confirm(`Are you sure you want to delete the submission from ${submissionName}? This action cannot be undone.`)) {
+      setDeletingId(submission.id);
+      deleteSubmission.mutate(submission.id);
+    }
   };
 
   if (isLoading) {
@@ -369,13 +413,24 @@ export default function SubmissionsTable({ assessmentId, onSelectSubmission }: S
                     {formatDate(submission.submittedAt)}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                    <button
-                      onClick={() => onSelectSubmission(submission)}
-                      className="text-blue-600 hover:text-blue-900 flex items-center gap-1"
-                    >
-                      <Eye className="w-4 h-4" />
-                      Review
-                    </button>
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => onSelectSubmission(submission)}
+                        className="text-blue-600 hover:text-blue-900 flex items-center gap-1"
+                      >
+                        <Eye className="w-4 h-4" />
+                        Review
+                      </button>
+                      <button
+                        onClick={() => handleDelete(submission)}
+                        disabled={deletingId === submission.id}
+                        className="text-red-600 hover:text-red-900 flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Delete submission"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        {deletingId === submission.id ? "Deleting..." : "Delete"}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))
