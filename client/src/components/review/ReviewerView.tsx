@@ -405,17 +405,17 @@ export default function ReviewerView({ submission, assessmentId, onClose }: Revi
               {(block.type === "audio_response" || block.type === "video_response") && (
                 <div className="space-y-3">
                   <p className="text-sm font-medium text-gray-700">Recording:</p>
-                  {responseData.mediaDataUrl ? (
+                  {(responseData.mediaDataUrl || responseData.mediaUrl) ? (
                     <div className="space-y-2">
                       {block.type === "audio_response" ? (
                         <audio
-                          src={responseData.mediaDataUrl}
+                          src={responseData.mediaUrl || responseData.mediaDataUrl}
                           controls
                           className="w-full"
                         />
                       ) : (
                         <video
-                          src={responseData.mediaDataUrl}
+                          src={responseData.mediaUrl || responseData.mediaDataUrl}
                           controls
                           className="w-full max-w-2xl rounded-lg"
                         />
@@ -447,27 +447,6 @@ export default function ReviewerView({ submission, assessmentId, onClose }: Revi
                           </div>
                         )}
                       </div>
-                    </div>
-                  ) : responseData.mediaUrl ? (
-                    <div className="space-y-2">
-                      {block.type === "audio_response" ? (
-                        <audio
-                          src={responseData.mediaUrl}
-                          controls
-                          className="w-full"
-                        />
-                      ) : (
-                        <video
-                          src={responseData.mediaUrl}
-                          controls
-                          className="w-full max-w-2xl rounded-lg"
-                        />
-                      )}
-                      {responseData.duration && (
-                        <p className="text-xs text-gray-500">
-                          Duration: {Math.round(responseData.duration)}s
-                        </p>
-                      )}
                     </div>
                   ) : (
                     <p className="text-sm text-gray-500">No recording available</p>

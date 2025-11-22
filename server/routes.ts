@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import { Router } from "express";
 import { storage } from "./storage";
+import { getStorageService } from "./services/storage";
 import { authenticateToken } from "./middleware/auth";
 import { authenticateApiKey, requirePermission } from "./middleware/apiKeyAuth";
 import { configureCORS, configureHelmet, publicRateLimit, adminRateLimit } from "./middleware/security";
@@ -192,6 +193,7 @@ export async function registerRoutes(app: Express): Promise<void> {
       let totalScore = 0;
       let maxScore = 0;
       const responseList = responses || [];
+      const storageService = getStorageService();
       
       console.log("[Routes] Processing", responseList.length, "responses");
       
@@ -209,10 +211,54 @@ export async function registerRoutes(app: Express): Promise<void> {
         
         console.log("[Routes] Creating block response for block:", response.blockId, "type:", block.type);
         
+        let responseData = response.responseData || {};
+        
+        // Handle media uploads (audio/video) - upload to storage if blob is provided
+        if ((block.type === "audio_response" || block.type === "video_response") && responseData.mediaDataUrl) {
+          try {
+            // Extract base64 data from data URL
+            const base64Match = responseData.mediaDataUrl.match(/^data:([^;]+);base64,(.+)$/);
+            if (base64Match) {
+              const contentType = base64Match[1];
+              const base64Data = base64Match[2];
+              const buffer = Buffer.from(base64Data, "base64");
+              
+              // Determine file extension from content type
+              const extension = contentType.includes("video") ? "webm" : contentType.includes("audio") ? "wav" : "bin";
+              const filename = `submission-${submission.id}-block-${block.id}.${extension}`;
+              const folder = `submissions/${submission.id}`;
+              
+              // Upload to storage service
+              const uploadResult = await storageService.uploadFile(
+                buffer,
+                filename,
+                contentType,
+                folder
+              );
+              
+              // Update response data with storage info
+              responseData = {
+                ...responseData,
+                mediaUrl: uploadResult.url,
+                mediaStorageProvider: uploadResult.provider,
+                ...(uploadResult.provider === "gcs" && { mediaGcsKey: uploadResult.key }),
+                ...(uploadResult.provider === "local" && { mediaDataUrl: uploadResult.key }),
+                // Remove the original mediaDataUrl if using GCS (to save space)
+                ...(uploadResult.provider === "gcs" && { mediaDataUrl: undefined }),
+              };
+              
+              console.log(`[Routes] Uploaded media to ${uploadResult.provider}:`, uploadResult.key);
+            }
+          } catch (uploadError) {
+            console.error("[Routes] Failed to upload media, keeping data URL:", uploadError);
+            // Keep the original mediaDataUrl if upload fails
+          }
+        }
+        
         const blockResponse = await storage.createBlockResponse({
           submissionId: submission.id,
           blockId: response.blockId,
-          responseData: response.responseData || {},
+          responseData,
           score: response.score || null,
           maxScore: block.config?.points || null,
         });
@@ -926,12 +972,87 @@ export async function registerRoutes(app: Express): Promise<void> {
       const submissionId = req.params.id;
       const clientId = req.user.clientId;
       
+      // Get all block responses to delete associated files from storage
+      const blockResponses = await storage.getBlockResponses(submissionId);
+      const storageService = getStorageService();
+      
+      // Delete files from storage if using GCS
+      for (const blockResponse of blockResponses) {
+        const responseData = blockResponse.responseData as any;
+        if (responseData?.mediaGcsKey && responseData?.mediaStorageProvider === "gcs") {
+          try {
+            await storageService.deleteFile(responseData.mediaGcsKey);
+            console.log(`[Routes] Deleted GCS file: ${responseData.mediaGcsKey}`);
+          } catch (deleteError) {
+            console.error(`[Routes] Failed to delete GCS file ${responseData.mediaGcsKey}:`, deleteError);
+            // Continue even if file deletion fails
+          }
+        }
+        if (responseData?.fileGcsKey && responseData?.fileStorageProvider === "gcs") {
+          try {
+            await storageService.deleteFile(responseData.fileGcsKey);
+            console.log(`[Routes] Deleted GCS file: ${responseData.fileGcsKey}`);
+          } catch (deleteError) {
+            console.error(`[Routes] Failed to delete GCS file ${responseData.fileGcsKey}:`, deleteError);
+            // Continue even if file deletion fails
+          }
+        }
+      }
+      
       await storage.deleteAssessmentSubmission(submissionId, clientId);
       res.json({ success: true });
     } catch (error: any) {
       console.error("[Routes] Error deleting submission:", error);
       res.status(500).json({ 
         error: "Failed to delete submission",
+        details: process.env.NODE_ENV === "development" ? error?.message : undefined
+      });
+    }
+  });
+
+  // File upload endpoint (for media files, PDFs, etc.)
+  adminRouter.post("/upload", async (req: any, res) => {
+    try {
+      // This endpoint expects base64 encoded file in JSON body
+      // Full multipart support can be added later with multer
+      const { file, filename, contentType, folder } = req.body;
+      
+      if (!file || !filename || !contentType) {
+        return res.status(400).json({ error: "file, filename, and contentType are required" });
+      }
+
+      // Decode base64 file
+      let buffer: Buffer;
+      if (typeof file === "string") {
+        // Check if it's a data URL or plain base64
+        const base64Match = file.match(/^data:([^;]+);base64,(.+)$/);
+        if (base64Match) {
+          buffer = Buffer.from(base64Match[2], "base64");
+        } else {
+          // Assume plain base64
+          buffer = Buffer.from(file, "base64");
+        }
+      } else {
+        return res.status(400).json({ error: "File must be base64 encoded string" });
+      }
+
+      const storageService = getStorageService();
+      const uploadResult = await storageService.uploadFile(
+        buffer,
+        filename,
+        contentType,
+        folder
+      );
+
+      res.json({
+        url: uploadResult.url,
+        key: uploadResult.key,
+        provider: uploadResult.provider,
+      });
+    } catch (error: any) {
+      console.error("[Routes] Error uploading file:", error);
+      res.status(500).json({ 
+        error: "Failed to upload file",
         details: process.env.NODE_ENV === "development" ? error?.message : undefined
       });
     }

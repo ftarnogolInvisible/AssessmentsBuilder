@@ -50,6 +50,16 @@ app.use((req, res, next) => {
   try {
     const httpServer = createServer(app);
     
+    // Initialize storage service (will use local or GCS based on env vars)
+    try {
+      const { getStorageService } = await import("./services/storage");
+      getStorageService(); // Initialize singleton
+      log("✅ Storage service initialized");
+    } catch (error) {
+      console.warn("⚠️  Storage service initialization warning:", error);
+      // Continue even if storage service fails (will use local fallback)
+    }
+    
     // Register API routes first
     await registerRoutes(app);
 

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { X, CheckCircle } from "lucide-react";
 import type { Assessment } from "@shared/schema";
 
@@ -9,23 +9,51 @@ interface AssessmentSettingsModalProps {
 }
 
 export default function AssessmentSettingsModal({ assessment, onClose }: AssessmentSettingsModalProps) {
+  const [showSuccess, setShowSuccess] = useState(false);
+  const queryClient = useQueryClient();
+
+  // Fetch the latest assessment data to ensure we have the most up-to-date settings
+  const { data: currentAssessment, isLoading } = useQuery<Assessment>({
+    queryKey: ["assessment", assessment.id],
+    queryFn: async () => {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`/api/admin/assessments/${assessment.id}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (!res.ok) throw new Error("Failed to fetch assessment");
+      return res.json();
+    },
+    // Use the passed assessment as initial data
+    initialData: assessment,
+    // Refetch when the modal opens to get latest data
+    refetchOnMount: true,
+  });
+
   const [enableProctoring, setEnableProctoring] = useState(
-    assessment.settings?.enableProctoring ?? true // Default to true for existing assessments
+    currentAssessment?.settings?.enableProctoring ?? false
   );
   const [requireFullScreen, setRequireFullScreen] = useState(
-    assessment.settings?.requireFullScreen ?? false // Default to false
+    currentAssessment?.settings?.requireFullScreen ?? false
   );
   const [requireSingleScreen, setRequireSingleScreen] = useState(
-    assessment.settings?.requireSingleScreen ?? false // Default to false
+    currentAssessment?.settings?.requireSingleScreen ?? false
   );
-  const [showSuccess, setShowSuccess] = useState(false);
 
-  const queryClient = useQueryClient();
+  // Update state when assessment data is fetched or changes
+  useEffect(() => {
+    if (currentAssessment) {
+      setEnableProctoring(currentAssessment.settings?.enableProctoring ?? false);
+      setRequireFullScreen(currentAssessment.settings?.requireFullScreen ?? false);
+      setRequireSingleScreen(currentAssessment.settings?.requireSingleScreen ?? false);
+    }
+  }, [currentAssessment]);
 
   const updateSettings = useMutation({
     mutationFn: async (settings: Assessment["settings"]) => {
       const token = localStorage.getItem("token");
-      const res = await fetch(`/api/admin/assessments/${assessment.id}/settings`, {
+      const res = await fetch(`/api/admin/assessments/${currentAssessment?.id || assessment.id}/settings`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -45,6 +73,7 @@ export default function AssessmentSettingsModal({ assessment, onClose }: Assessm
       queryClient.invalidateQueries({ queryKey: ["campaigns"] });
       queryClient.invalidateQueries({ queryKey: ["assessment", assessment.id] });
       queryClient.invalidateQueries({ queryKey: ["assessment"] }); // Invalidate all assessment queries (including publicUrl queries)
+      queryClient.invalidateQueries({ queryKey: ["assessments"] }); // Invalidate assessments list
       setShowSuccess(true);
       setTimeout(() => {
         setShowSuccess(false);
@@ -59,12 +88,22 @@ export default function AssessmentSettingsModal({ assessment, onClose }: Assessm
 
   const handleSave = () => {
     updateSettings.mutate({
-      ...assessment.settings,
+      ...currentAssessment?.settings,
       enableProctoring,
       requireFullScreen,
       requireSingleScreen,
     });
   };
+
+  if (isLoading) {
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="bg-white rounded-lg shadow-xl p-6">
+          <p>Loading settings...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">

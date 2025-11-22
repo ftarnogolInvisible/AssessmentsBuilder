@@ -18,25 +18,30 @@ A comprehensive web platform for building and delivering modular assessments. Ad
 - **Block Configuration**: Title, instructions, required toggle, time limits, scoring, copy/paste prevention
 - **Preview Mode**: Full-screen preview with progress tracking
 - **Versioning**: Draft and published states for assessments
-- **Assessment Settings**: Per-assessment configuration for proctoring and full-screen mode
+- **Assessment Settings**: Per-assessment configuration for proctoring, full-screen mode, and single-screen requirement
 
 ### Assessment Delivery
 - **Public URLs**: Unique links for each published assessment
 - **Media Recording**: Built-in audio and video recording with WebRTC
 - **Progress Tracking**: Visual progress indicators
 - **Autosave**: Automatic saving of responses
-- **Time Limits**: Per-block time limits with automatic progression
+- **Time Limits**: Per-block time limits with automatic progression and expiration enforcement
 - **Anti-Cheating Features**:
   - Copy/paste prevention (configurable per block)
   - Video proctoring with eye and face tracking (MediaPipe)
   - Full-screen mode enforcement
+  - Single-screen requirement (prevents multiple monitors)
+  - Browser compatibility check (Chrome-based/Edge only)
   - Tab/window switching detection
-  - Integrity violation logging
+  - Integrity violation logging with screenshots
+  - System information capture (browser, OS, device, RAM, screen resolution, IP)
 
 ### Admin Dashboard
 - **Project Management**: Hierarchical organization (Campaigns → Projects → Assessments)
 - **Submission Review**: Review and grade user submissions with integrity violation tracking
 - **Media Playback**: Playback audio and video responses
+- **System Information**: View detailed system info for each submission (browser, OS, device, RAM, screen resolution, IP)
+- **Submission Management**: Delete individual submissions with confirmation
 - **Export**: Export submission data (CSV/JSON)
 - **User Management**: 
   - User creation and management
@@ -61,7 +66,7 @@ A comprehensive web platform for building and delivering modular assessments. Ad
 - **Backend**: Node.js + Express + TypeScript
 - **Database**: PostgreSQL (Docker or hosted)
 - **ORM**: Drizzle ORM
-- **Storage**: S3-compatible storage (optional)
+- **Storage**: Local storage (base64) with Google Cloud Storage (GCS) support ready
 - **UI Components**: Radix UI + Tailwind CSS
 - **Drag & Drop**: @dnd-kit
 - **State Management**: TanStack Query
@@ -150,6 +155,8 @@ AssessmentBuilder/
 │   │   │   ├── assessment/    # Assessment taking components
 │   │   │   │   ├── AssessmentTaker.tsx
 │   │   │   │   └── ProctoringCamera.tsx
+│   │   │   └── utils/         # Utility functions
+│   │   │       └── systemInfo.ts  # System information detection
 │   │   │   ├── builder/       # Assessment builder components
 │   │   │   │   ├── AssessmentBuilder.tsx
 │   │   │   │   ├── CodingBlock.tsx
@@ -169,7 +176,8 @@ AssessmentBuilder/
 │   │   ├── apiKeyAuth.ts      # API key authentication
 │   │   └── security.ts        # CORS, Helmet, rate limiting
 │   ├── services/              # Business logic services
-│   │   └── webhookService.ts  # Webhook triggering and retry
+│   │   ├── webhookService.ts  # Webhook triggering and retry
+│   │   └── storage.ts         # Storage service abstraction (Local/GCS)
 │   ├── utils/                 # Utility functions
 │   │   └── encryption.ts      # API key encryption
 │   ├── db.ts                  # Database connection
@@ -236,13 +244,19 @@ AssessmentBuilder/
 - ✅ Anti-cheating system (copy/paste prevention)
 - ✅ Video proctoring with eye and face tracking
 - ✅ Full-screen mode enforcement
+- ✅ Single-screen requirement (multiple monitor detection)
+- ✅ Browser compatibility validation (Chrome-based/Edge only)
 - ✅ Integrity violation tracking and logging
+- ✅ Screenshot capture on violations (max 6 per assessment, 640p)
 - ✅ Coding block with ACE editor
 - ✅ LaTeX block with KaTeX rendering
-- ✅ Time limit enforcement
+- ✅ Time limit enforcement with expiration blocking
 - ✅ Platform settings with LLM API key storage
 - ✅ User management system with roles and invites
 - ✅ Granular permissions system
+- ✅ System information capture and display
+- ✅ Individual submission deletion
+- ✅ Google Cloud Storage abstraction layer (ready for GCS integration)
 
 ## 🔧 Available Scripts
 
@@ -261,9 +275,11 @@ Key environment variables (see `env.example` for full list):
 - `PORT` - Server port (default: 5000)
 - `JWT_SECRET` - Secret for JWT tokens
 - `ENCRYPTION_KEY` - Encryption key for API keys (32+ characters, use Secret Manager in production)
-- `S3_BUCKET` - S3 bucket name (optional)
-- `AWS_ACCESS_KEY_ID` - AWS access key (optional)
-- `AWS_SECRET_ACCESS_KEY` - AWS secret key (optional)
+- `STORAGE_PROVIDER` - Storage provider: "local" (default) or "gcs"
+- `GCS_BUCKET_NAME` - Google Cloud Storage bucket name (required if STORAGE_PROVIDER=gcs)
+- `GCS_PROJECT_ID` - Google Cloud project ID (required if STORAGE_PROVIDER=gcs)
+- `GCS_KEY_FILENAME` - Path to GCS service account key file (optional)
+- `GCS_CREDENTIALS` - JSON string of GCS credentials (optional, alternative to key file)
 - `CORS_ORIGIN` - CORS allowed origins
 - `FRONTEND_URL` - Frontend URL for invite links (optional)
 
@@ -281,8 +297,8 @@ The platform uses a multi-tenant architecture with the following main entities:
 - **assessments** - Individual assessment instances with versioning and settings
 - **blocks** - Question/element blocks within assessments
   - Types: multiple_choice, multi_select, free_text, coding_block, latex_block, audio_response, video_response, media_stimulus
-- **assessment_submissions** - User submissions with integrity violations tracking
-- **block_responses** - Individual responses to blocks
+- **assessment_submissions** - User submissions with integrity violations tracking and system information
+- **block_responses** - Individual responses to blocks (supports GCS storage keys)
 - **api_keys** - API keys for external integrations with permissions
 - **webhook_events** - Log of webhook triggers with retry tracking
 - **platform_settings** - Platform-wide settings including LLM API keys
@@ -335,11 +351,14 @@ npm run db:push
 
 ### Proctoring & Anti-Cheating
 - Video proctoring with MediaPipe Face Mesh
-- Eye and face tracking
-- Full-screen mode enforcement
+- Eye and face tracking with real-time violation detection
+- Full-screen mode enforcement with exit detection
+- Single-screen requirement (blocks multiple monitors)
+- Browser compatibility check (Chrome-based/Edge only)
 - Tab/window switching detection
 - Copy/paste prevention (configurable per block)
-- All violations logged with timestamps and screenshots
+- All violations logged with timestamps and screenshots (max 6 screenshots per assessment)
+- System information capture (browser, OS, device, RAM, screen resolution, IP address)
 
 ## 🚀 Deployment
 
@@ -349,13 +368,14 @@ The platform is designed for deployment on Google Cloud:
 - **Cloud Run**: Containerized deployment
 - **Cloud SQL**: Managed PostgreSQL
 - **Secret Manager**: Secure storage for encryption keys
-- **Cloud Storage**: Media file storage (optional)
+- **Cloud Storage**: Media file storage (abstraction layer ready, see `STORAGE_SETUP.md`)
 
 ### Environment Setup
 1. Set `ENCRYPTION_KEY` in Secret Manager
 2. Configure `DATABASE_URL` for Cloud SQL
-3. Set up Cloud Storage buckets (if using S3-compatible storage)
+3. Set up Cloud Storage buckets (if using GCS storage - see `STORAGE_SETUP.md`)
 4. Configure CORS origins for production domain
+5. Set `STORAGE_PROVIDER=gcs` and provide GCS credentials if using Cloud Storage
 
 ### Docker Support
 The platform can be containerized for deployment:

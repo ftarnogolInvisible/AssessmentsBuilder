@@ -240,12 +240,18 @@ export const blockResponses = pgTable("block_responses", {
     selectedOptionIds?: string[];
     // For audio/video response
     mediaUrl?: string;
-    mediaS3Key?: string;
+    mediaDataUrl?: string; // Base64 data URL (for local storage)
+    mediaS3Key?: string; // Legacy S3 key field
+    mediaGcsKey?: string; // Google Cloud Storage key/path
+    mediaStorageProvider?: "local" | "gcs"; // Storage provider used
     mediaType?: "audio" | "video";
     duration?: number; // seconds
     // For file uploads
     fileUrl?: string;
-    fileS3Key?: string;
+    fileDataUrl?: string; // Base64 data URL (for local storage)
+    fileS3Key?: string; // Legacy S3 key field
+    fileGcsKey?: string; // Google Cloud Storage key/path
+    fileStorageProvider?: "local" | "gcs"; // Storage provider used
     fileName?: string;
     fileType?: string;
     // Text responses
